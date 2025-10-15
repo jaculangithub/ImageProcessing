@@ -1,0 +1,71 @@
+@startuml
+class Customer {
+  name: String
+  email: String Order
+  orderld: int
+  + getName(): String date: Date
+  + placeOrder(): void -
+  + getTotal(): double
+  productld: int
+  - price: double
+  + getPrice(): double
+}
+
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+Customer -- Customer
+@enduml

@@ -1,0 +1,26 @@
+{
+  "objects": [
+    {
+      "id": "obj_0",
+      "type": "object",
+      "x": 1398,
+      "y": 38,
+      "width": 224,
+      "height": 144,
+      "name": "Object"
+    }
+  ],
+  "messages": [],
+  "actors": [
+    {
+      "id": "actor_0",
+      "type": "actor",
+      "x": 599,
+      "y": 59,
+      "width": 101,
+      "height": 180,
+      "name": "Actor_0"
+    }
+  ],
+  "lifelines": []
+}
