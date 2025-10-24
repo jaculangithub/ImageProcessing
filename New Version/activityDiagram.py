@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import math 
 import pytesseract
 from pytesseract import Output
+import json
 
 epsilon_ratio = 0.04
 
@@ -101,6 +102,7 @@ def detect_rectangles(vertical_pairs, horizontal_pairs, vertical_lines, horizont
                     
     return rectangles, line_areas_to_remove
 
+
 # ---------------- Modified: Draw rectangles and remove lines that probably a circle ----------------
 def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255, 255, 255)):
     image_rect = image.copy()
@@ -122,8 +124,6 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
             image_rect[middle_y-3:middle_y+3, x-3] = bg_color       #remove left 
             image_rect[middle_y-3:middle_y+3,x+w+3] = bg_color      #remove right
         
-        
-              
     for hLine in hLines:
         x, y, w, h = hLine
         
@@ -138,83 +138,6 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
     
     return image_rect
 
-
-# new code 9/27/2025 12AM
-# def classify_relationship(contours, hierarchy, idx):
-#     """
-#     Classify a contour (line + attached symbol) into UML relationship type.
-#     Returns classification and points (start/end for directed, endpoints for plain associations).
-#     """
-    
-#     global epsilon_ratio
-#     cnt = contours[idx]
-#     child_idx = hierarchy[0][idx][2]
-#     has_five_seq, convexHull = None, None
-#     epsilon_ratio = 0.04
-#     has_five_seq, convexHull = None, None
-#     while True:
-#         # Get approximate points for the contour
-#         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
-#         approx = cv2.approxPolyDP(cnt, epsilon, True)
-#         vertices = len(approx)
-        
-#         # Find two farthest points (endpoints for all line types)
-#         farthest_points = find_farthest_points(approx)
-#         if farthest_points is None:
-#             return "Association (plain line)", None, None, None, None, approx
-        
-#         point1, point2, max_distance = farthest_points
-        
-#             # If no 5-point sequence, check if it has a child symbol
-#         if child_idx != -1:
-#             child_cnt = contours[child_idx]
-#             child_epsilon = 0.08 * cv2.arcLength(child_cnt, True)
-#             child_approx = cv2.approxPolyDP(child_cnt, child_epsilon, True)
-#             child_vertices = len(child_approx)
-#             # print("Points: ", child_approx.reshape(-1, 2))
-#             # Classify symbol type
-#             if child_vertices == 3:
-#                 relationship_type = "inheritance"
-#             elif child_vertices == 4:
-#                 relationship_type = "aggregation"
-#             else:
-#                 relationship_type = "Other unfilled shape"
-            
-#             # Determine start/end: which farthest point is closer to child symbol
-#             start_point, end_point = determine_start_end_with_child(point1, point2, child_approx)
-            
-#             return relationship_type, start_point, end_point, point1, point2, approx
-        
-              
-#         # First, check for 5-point sequence (this takes priority)
-#         has_five_seq, convexHull = find_five_point_sequence(approx, point1, point2)
-        
-#         if has_five_seq: #break if have 5-point sequence,
-#             # print("meron")
-#             break
-#         # if the decimal is exceeding to the bsta pag lumagpas
-#         elif epsilon_ratio <= 0.005:
-#             # print("greatdr", len(approx))
-#             break 
-        
-#         epsilon_ratio = epsilon_ratio / 2  # decrease epsilon to get more detailed approx
-    
-#     # print("Classifying, Current Epsilon: ", epsilon_ratio)
-    
-#     if has_five_seq:
-#         if convexHull and convexHull == 3:
-#             relationship_type = "directed association"
-#         else:
-#             relationship_type = "composition"
-#         # Determine start/end for 5-point sequence relationships
-#         start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
-#         # print("Start", start_point, " End: ", end_point, " Point1: ", point1, " Point2: ", point2)
-#         return relationship_type, start_point, end_point, point1, point2, approx
-#     else:
-#         # If no 5-point sequence and no child symbol, it's a plain association
-#         relationship_type = "association"
-#         # Return endpoints but no start/end direction
-#         return relationship_type, None, None, point1, point2, approx
 
 def find_farthest_points(approx_points):
     """Find the two points with maximum distance in a set of points."""
@@ -237,22 +160,6 @@ def find_farthest_points(approx_points):
     
     return point1, point2, max_distance
 
-# def determine_start_end_with_child(point1, point2, child_approx):
-#     """Determine start/end for contours with child symbols."""
-#     child_points = np.squeeze(child_approx)
-    
-#     if len(child_points) == 0:
-#         return point1, point2  # Fallback
-    
-#     # Calculate distances from each point to the child symbol
-#     dist1 = min([np.linalg.norm(np.array(point1) - child_point) for child_point in child_points])
-#     dist2 = min([np.linalg.norm(np.array(point2) - child_point) for child_point in child_points])
-    
-#     # The point closer to the child symbol is the end (arrowhead/diamond side)
-#     if dist1 < dist2:
-#         return point2, point1  # point1 is end (closer to symbol)
-#     else:
-#         return point1, point2  # point2 is end (closer to symbol)
 
 def determine_start_end_five_sequence(point1, point2, approx):
     """Determine start/end for 5-point sequence (filled diamond)."""
@@ -281,12 +188,13 @@ def determine_start_end_five_sequence(point1, point2, approx):
         print("Both wala")
         return None, None
 
+
 def find_five_point_sequence(points, point1, point2, min_tolerance=5, tolerance_percent=0.25):
     """Find and return the 5-point sequence if it exists."""
     n = len(points)
     if n < 5:
         return None, None
-    
+    # dist, mx, mn = None, None, None
     for start in range(n):
         distances = []
         seq_points = []
@@ -324,20 +232,18 @@ def find_five_point_sequence(points, point1, point2, min_tolerance=5, tolerance_
         
         dynamic_tolerance = max_dist - scaled_min
         
+        # dist, mx, mn = dynamic_tolerance, max(distances), min(distances)
+        
         if max(distances) - min(distances) <= dynamic_tolerance+5:
             seq_np = np.array(seq_points, dtype=np.int32)
             hull = cv2.convexHull(seq_np, returnPoints=True)
             hull_count = len(hull)
-            # print("Found 5 points - L267")
-            # print(f"Points: {seq_points}, Distances: {distances}")
-            # print(f"Hull Count: {hull_count}, Max: {max(distances):.2f}, Min: {min(distances):.2f}")
-            # print("Tolerance1: ", max(distances)-min(distances))
-            # print("Tolerance: ",  dynamic_tolerance)
-            if hull_count >= 4:
+      
+            # if hull_count >= 4:
+            #     return seq_points, hull_count
+            if hull_count == 3:
                 return seq_points, hull_count
-            elif hull_count == 3:
-                return seq_points, hull_count
-            
+       
     # print("No 5points found that don't contain both farthest points")
     return None, None
 
@@ -374,21 +280,20 @@ def classify_based_on_child(contours, hierarchy, idx):
     child_idx = hierarchy[0][idx][2]
     while child_idx != -1:
         child_cnt = contours[child_idx]
+        x, y, w, h = cv2.boundingRect(child_cnt)
         child_epsilon = 0.08 * cv2.arcLength(child_cnt, True)
         child_approx = cv2.approxPolyDP(child_cnt, child_epsilon, True)
         
         # If child has 4 points (diamond shape)
-        if len(child_approx) == 4:
+        if len(child_approx) == 4 and w/h > .9:
             print("Found diamond child - directed association")
             return "diamond node", None, None, approx
         
         # Move to next sibling child
         child_idx = hierarchy[0][child_idx][0]
     
-    
-    
     # Default for contours with children but no specific shape
-    return "activity node", None, None, approx
+    return "line", None, None, approx
     
     
 def classify_contour(contours, hierarchy, idx):
@@ -399,73 +304,75 @@ def classify_contour(contours, hierarchy, idx):
     
     if child_idx != -1: # has child, likely relationship
         print("has child")
-        # return None, None, None, None
-        return classify_based_on_child(contours, hierarchy, idx)
+        
+        x, y, w, h = cv2.boundingRect(contours[child_idx])
+        
+        if (w > 10 and h > 10):
+            # return None, None, None, None
+            return classify_based_on_child(contours, hierarchy, idx)
+
+    epsilon_ratio = 0.04
+    cnt = contours[idx]
+    has_five_seq, convexHull = None, None
+    approx = None
+    x, y, w, h = cv2.boundingRect(cnt)
+    area = cv2.contourArea(cnt)
+    bbox_area = w * h
     
-    else: 
+    # Calculate circularity (for start/end nodes)
+    perimeter = cv2.arcLength(cnt, True)
+    if perimeter > 0:
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+    else:
+        circularity = 0
+    
+    print(" area: ", area, "B area: ", bbox_area, " Circularity ", circularity)
+    # Check for circular shape (start node)
+    if bbox_area > 0 and (area / bbox_area) >= 0.75 and circularity >= 0.7:
+        print("start node")
+        epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        return "start node", None, None, approx
+    
+    # likey arrow
+    while True:
+        epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        
+        # find two farthest points
+        farthest_points = find_farthest_points(approx)
+        if farthest_points is None:
+            return "Unknown", None, None, approx
+        
+        point1, point2, max_distance = farthest_points 
+        # check if the approx has 5points sequence 
+        has_five_seq, convexHull = find_five_point_sequence(approx, point1, point2)
 
-        epsilon_ratio = 0.04
-        cnt = contours[idx]
-        has_five_seq, convexHull = None, None
-        approx = None
-        x, y, w, h = cv2.boundingRect(cnt)
-        area = cv2.contourArea(cnt)
-        bbox_area = w * h
+        if has_five_seq: #break if have 5-point sequence,
+            # print("meron likely an arrow")
+            break
         
-        # Calculate circularity (for start/end nodes)
-        perimeter = cv2.arcLength(cnt, True)
-        if perimeter > 0:
-            circularity = 4 * np.pi * area / (perimeter * perimeter)
-        else:
-            circularity = 0
-        
-        print(" area: ", area, "B area: ", bbox_area, " Circularity ", circularity)
-        # Check for circular shape (start node)
-        if bbox_area > 0 and (area / bbox_area) >= 0.75 and circularity >= 0.7:
-            print("start node")
-            epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
-            approx = cv2.approxPolyDP(cnt, epsilon, True)
-            return "start node", None, None, approx
-        
-        # likey arrow
-        while True:
-            epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
-            approx = cv2.approxPolyDP(cnt, epsilon, True)
+        elif epsilon_ratio <= 0.01:
+            print("greatdr", len(approx))
+            break
+
+        epsilon_ratio = epsilon_ratio / 2  # decrease epsilon to get more detailed approx
+
+    if has_five_seq:
+        if convexHull and convexHull == 3:
+            print("directed arrow")
+            classification = "directed arrow"
+            start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
             
-            # find two farthest points
-            farthest_points = find_farthest_points(approx)
-            if farthest_points is None:
-                return "Unknown", None, None, approx
+            return classification, start_point, end_point, approx
+        else: 
+            print("line")
             
-            point1, point2, max_distance = farthest_points 
-            # check if the approx has 5points sequence 
-            has_five_seq, convexHull = find_five_point_sequence(approx, point1, point2)
-
-            if has_five_seq: #break if have 5-point sequence,
-                # print("meron likely an arrow")
-                break
-            
-            elif epsilon_ratio <= 0.005:
-                print("greatdr", len(approx))
-                break
-
-            epsilon_ratio = epsilon_ratio / 2  # decrease epsilon to get more detailed approx
-
-        if has_five_seq:
-            if convexHull and convexHull == 3:
-                print("directed arrow")
-                classification = "directed arrow"
-                start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
-                
-                return classification, start_point, end_point, approx
-            else: 
-                print("line")
-                classification = "line" 
-                return "line", None, None, approx
-        
-        print("unknown")
-        return "line", None, None, approx
-        
+            classification = "line" 
+            return "line", None, None, approx
+    
+    print("unknown")
+    return "line", None, None, approx
         
 # new code 10/1/2024 1AM - improved merging logic to handle chains and prevent arrow head merging
 def detect_contours(image, rectangles, bg_color=0, min_area=100):
@@ -541,7 +448,7 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
     # Find contours
     contours, hierarchy = cv2.findContours(
         detectedContours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-    ) 
+    )
 
     contour_img = cv2.cvtColor(detectedContours, cv2.COLOR_GRAY2BGR)
     contours_info = []
@@ -582,9 +489,8 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                     cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
                 
                 break  # No need to check other rectangles
-            
-        if inTheRect: continue  # Skip this contour entirely
         
+        if inTheRect: continue  # Skip this contour entirely
         
         if w > 25 or h > 25:  # filter small noise
             parent = hierarchy[0][i][3]
@@ -594,18 +500,19 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 continue  # skip child contours
                 
             count += 1
-         
+            
             classification, start_point, end_point, approx = classify_contour(
                 contours, hierarchy, i
             )
             print(f"Contour {count}: {classification}, Start: {start_point}, End: {end_point}")
             x, y, w, h = cv2.boundingRect(approx)
+         
             # Draw bounding box
             cv2.rectangle(contour_img, (x - 1, y - 1), (x + w, y + h), (0, 255, 0), 1)
             cv2.putText(contour_img, str(count) + " " + str(classification), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, (0, 0, 255), 1, cv2.LINE_AA)
 
-            # # Draw approx points
+            # Draw approx points
             epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
 
@@ -618,12 +525,9 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             
             for pt in approx:
                 cv2.circle(contour_img, tuple(pt[0]), 1, (255, 0, 0), -1)
-
-            # Save info for merging - ONLY CHANGE: added has_arrow_head flag
+                
          
-    
     return contours_info, hierarchy, detectedContours, contour_img, detectText
-
 
 
 # ---------------- Step 7: Visualization ----------------
@@ -647,6 +551,559 @@ def visualize(vertical_lines, horizontal_lines, image_rect):
     
     plt.tight_layout()
     plt.show()
+
+
+def merge_nearby_texts(texts, x_margin=15, y_margin=20, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
+    """
+    Merge nearby text boxes into sentences while ignoring vertical dash-like noise.
+    Uses adaptive vertical grouping for multi-line text.
+    
+    :param texts: list of tuples (x, y, w, h, text)
+    :param x_margin: horizontal gap threshold to merge
+    :param y_margin: vertical gap threshold to consider same paragraph
+    :param dash_width_threshold: max width to consider as dash noise
+    :param align_threshold: max allowed difference in X to consider aligned
+    :param min_vertical_group: number of aligned small-width texts to be considered noise
+    :return: merged list of tuples (x, y, w, h, sentence)
+    """
+    if not texts:
+        return []
+
+    # --- STEP 1: Detect and remove vertical dash groups ---
+    dash_candidates = [t for t in texts if t[2] < dash_width_threshold]
+
+    remove_set = set()
+    for i, entry in enumerate(dash_candidates):
+        x_i = entry[0]
+        aligned_group = [entry]
+        for other in dash_candidates:
+            if other is not entry:
+                if abs(other[0] - x_i) <= align_threshold:
+                    aligned_group.append(other)
+
+        if len(aligned_group) >= min_vertical_group:
+            for e in aligned_group:
+                remove_set.add(e)
+
+    texts = [t for t in texts if t not in remove_set]
+
+    # --- STEP 2: Group by horizontal lines first ---
+    texts_sorted = sorted(texts, key=lambda t: (t[1], t[0]))
+
+    # First pass: merge horizontally on same line
+    horizontal_lines = []
+    current_line = [texts_sorted[0]]
+
+    for i in range(1, len(texts_sorted)):
+        current_text = texts_sorted[i]
+        last_text = texts_sorted[i-1]
+        
+        x1, y1, w1, h1, _ = current_text
+        x2, y2, w2, h2, _ = last_text
+        
+        # Check if same line (similar Y position)
+        same_line = abs((y1 + h1/2) - (y2 + h2/2)) <= y_margin / 2
+        
+        if same_line:
+            current_line.append(current_text)
+        else:
+            horizontal_lines.append(current_line)
+            current_line = [current_text]
+
+    if current_line:
+        horizontal_lines.append(current_line)
+
+    # Merge each horizontal line
+    merged_horizontal = []
+    for line in horizontal_lines:
+        line_sorted = sorted(line, key=lambda t: t[0])  # Sort by X
+        current_group = [line_sorted[0]]
+        
+        for text in line_sorted[1:]:
+            last_x, last_y, last_w, last_h, last_text = current_group[-1]
+            x, y, w, h, current_text = text
+            
+            # Check horizontal proximity
+            horizontal_gap = x - (last_x + last_w)
+            
+            if horizontal_gap <= x_margin:
+                current_group.append(text)
+            else:
+                # Merge current group
+                if current_group:
+                    x0 = min(t[0] for t in current_group)
+                    y0 = min(t[1] for t in current_group)
+                    x1 = max(t[0] + t[2] for t in current_group)
+                    y1 = max(t[1] + t[3] for t in current_group)
+                    sentence = " ".join(t[4] for t in current_group)
+                    merged_horizontal.append((x0, y0, x1 - x0, y1 - y0, sentence))
+                
+                current_group = [text]
+        
+        # Merge remaining group
+        if current_group:
+            x0 = min(t[0] for t in current_group)
+            y0 = min(t[1] for t in current_group)
+            x1 = max(t[0] + t[2] for t in current_group)
+            y1 = max(t[1] + t[3] for t in current_group)
+            sentence = " ".join(t[4] for t in current_group)
+            merged_horizontal.append((x0, y0, x1 - x0, y1 - y0, sentence))
+
+    # --- STEP 3: Group vertically for multi-line text ---
+    merged_horizontal_sorted = sorted(merged_horizontal, key=lambda t: (t[1], t[0]))
+    
+    vertical_groups = []
+    used = set()
+    
+    for i, text1 in enumerate(merged_horizontal_sorted):
+        if i in used:
+            continue
+            
+        vertical_group = [text1]
+        used.add(i)
+        
+        x1, y1, w1, h1, t1 = text1
+        
+        # Find vertically aligned text below
+        for j, text2 in enumerate(merged_horizontal_sorted):
+            if j in used:
+                continue
+                
+            x2, y2, w2, h2, t2 = text2
+            
+            # Check if text2 is below text1 and vertically aligned
+            is_below = y2 > y1 + h1  # text2 is below text1
+            vertical_gap = y2 - (y1 + h1)
+            horizontal_overlap = not (x1 + w1 < x2 or x2 + w2 < x1)
+            similar_width = abs(w1 - w2) <= max(w1, w2) * 0.5  # Within 50% width difference
+            
+            # More flexible vertical grouping conditions
+            if (is_below and vertical_gap <= y_margin * 2 and 
+                (horizontal_overlap or similar_width)):
+                vertical_group.append(text2)
+                used.add(j)
+        
+        vertical_groups.append(vertical_group)
+
+    # --- STEP 4: Merge vertical groups ---
+    final_merged = []
+    
+    for group in vertical_groups:
+        if len(group) == 1:
+            # Single line, just add as is
+            final_merged.append(group[0])
+        else:
+            # Multiple lines, merge with proper formatting
+            group_sorted = sorted(group, key=lambda t: t[1])  # Sort by Y
+            
+            x0 = min(t[0] for t in group_sorted)
+            y0 = min(t[1] for t in group_sorted)
+            x1 = max(t[0] + t[2] for t in group_sorted)
+            y1 = max(t[1] + t[3] for t in group_sorted)
+            
+            # Combine text with space (not newline for now)
+            sentence = " ".join(t[4] for t in group_sorted)
+            final_merged.append((x0, y0, x1 - x0, y1 - y0, sentence))
+
+    return final_merged
+
+
+def processText(texts, y_threshold=5):
+    """
+    Sort texts: group by lines (similar Y), then sort each line left to right
+    """
+    if not texts:
+        return ""
+    
+    # Sort all texts by Y first, then X
+    texts_sorted = sorted(texts, key=lambda t: (t[1], t[0]))
+    
+    # Group by lines based on Y threshold
+    lines = []
+    current_line = [texts_sorted[0]]
+    
+    for i in range(1, len(texts_sorted)):
+        current_text = texts_sorted[i]
+        prev_text = texts_sorted[i-1]
+        
+        # Calculate Y centers
+        current_center_y = current_text[1] + current_text[3] / 2
+        prev_center_y = prev_text[1] + prev_text[3] / 2
+        
+        # Check if Y difference is within threshold (same line)
+        if abs(current_center_y - prev_center_y) <= y_threshold:
+            current_line.append(current_text)
+        else:
+            # Sort current line left to right and add to lines
+            current_line.sort(key=lambda t: t[0])
+            lines.append(current_line)
+            current_line = [current_text]
+    
+    # Add the last line
+    if current_line:
+        current_line.sort(key=lambda t: t[0])
+        lines.append(current_line)
+    
+    # Build the final text
+    words = ""
+    for line in lines:
+        for text in line:
+            _, _, _, _, txt = text
+            words = words + " " + txt
+    
+    return words.strip()
+
+
+def mergeTransition(transitions, texts, margin=5):
+    # Standardize point formats to numpy arrays
+    def standardize_point(point):
+        if point is None:
+            return None
+        if isinstance(point, np.ndarray):
+            point = point.astype(np.int32)  # Use integers instead of floats
+            if point.ndim > 1:
+                point = point.flatten()
+            return point
+        elif isinstance(point, tuple):
+            # Convert tuple of numpy scalars or regular tuples to numpy array
+            if all(isinstance(x, (np.integer, np.floating)) for x in point):
+                return np.array([float(x) for x in point], dtype=np.float64)
+            else:
+                return np.array(point, dtype=np.float64)
+        elif hasattr(point, '__iter__'):
+            return np.array(point, dtype=np.float64)
+        else:
+            return np.array([point], dtype=np.float64)
+
+    # detect nearby text
+    for transition in transitions:
+        # Get bounding box of transition
+        tx1, ty1, tw, th = cv2.boundingRect(transition["approx"])
+        tx2, ty2 = tx1 + tw, ty1 + th
+        
+        # Expand transition bbox with margin
+        trans_bbox_expanded = (tx1 - margin, ty1 - margin, tx2 + margin, ty2 + margin)
+        ex1, ey1, ex2, ey2 = trans_bbox_expanded
+        
+        # Find texts whose bbox intersects with expanded transition bbox
+        label = ""
+        for text in texts:
+            bx, by, bw, bh, text_content = text
+            text_bbox = (bx, by, bx + bw, by + bh)
+            bx1, by1, bx2, by2 = text_bbox
+            
+            # Check if text bbox intersects with expanded transition bbox
+            if (bx1 < ex2 and bx2 > ex1 and by1 < ey2 and by2 > ey1):
+                label = text_content
+                transition["label"] = label
+                break
+        
+    # merge transitions that has same label
+    removeTransitions = []
+    mergeTransitions = []
+    
+    for i in range(len(transitions)):
+        if transitions[i].get("label") is None:
+            continue
+        for j in range(i + 1, len(transitions)):
+            if transitions[j].get("label") is None or (transitions[i].get("end") is not None and transitions[j].get("end") is not None):
+                continue
+            if transitions[i].get("label") == transitions[j].get("label"):
+                label = transitions[i]["label"]
+                print(f"Transition {i} and {j} have same label: '{label}'")
+                
+                arrowhead = None
+                startPoint = None
+                
+                iPoint1, iPoint2 = None, None
+                if(transitions[i].get("start") is None):
+                    iPoint1, iPoint2, _ = find_farthest_points(transitions[i].get("approx"))
+                else:
+                    iPoint1, iPoint2 = transitions[i].get("start"), transitions[i].get("end")
+                    arrowhead = iPoint2
+                    
+                jPoint1, jPoint2 = None, None
+                if(transitions[j].get("start") is None):
+                    jPoint1, jPoint2, _ = find_farthest_points(transitions[j].get("approx"))
+                else:
+                    jPoint1, jPoint2 = transitions[j].get("start"), transitions[j].get("end")
+                    arrowhead = jPoint2
+                
+                # Standardize points to numpy arrays
+                iPoint1 = standardize_point(iPoint1)
+                iPoint2 = standardize_point(iPoint2)
+                jPoint1 = standardize_point(jPoint1)
+                jPoint2 = standardize_point(jPoint2)
+                
+                if arrowhead is not None:  # one of the transition has arrowhead
+                    transition_type = "directed arrow"
+                    
+                    # Determine which transition has the arrowhead
+                    if transitions[i].get("end") is not None:
+                        # i has arrowhead, j is plain line
+                        arrowhead = standardize_point(transitions[i]["end"])
+                        # For plain line j, find the point farthest from the arrowhead
+                        points = transitions[j].get("approx")
+                        max_distance = 0
+                        for point in points:
+                            point_arr = standardize_point(point)
+                            distance = np.linalg.norm(arrowhead - point_arr)
+                            if distance > max_distance:
+                                max_distance = distance
+                                startPoint = point_arr  # Store as numpy array
+                    else:
+                        # j has arrowhead, i is plain line
+                        arrowhead = standardize_point(transitions[j]["end"])
+                        # For plain line i, find the point farthest from the arrowhead
+                        points = transitions[i].get("approx")
+                        max_distance = 0
+                        for point in points:
+                            point_arr = standardize_point(point)
+                            distance = np.linalg.norm(arrowhead - point_arr)
+                            if distance > max_distance:
+                                max_distance = distance
+                                startPoint = point_arr  # Store as numpy array
+                
+                else:  # both transitions are plain lines
+                    transition_type = "line"
+                    # Combine both contours and find the two farthest points
+                    combined_approx = np.vstack([transitions[i].get("approx"), transitions[j].get("approx")])
+                    start, end, _ = find_farthest_points(combined_approx)
+                    startPoint = standardize_point(start)
+                    arrowhead = standardize_point(end)
+                
+                # Merge the contours
+                merged_approx = np.vstack([transitions[i].get("approx"), transitions[j].get("approx")])
+                
+                # Mark transitions for removal
+                removeTransitions.append(transitions[i])
+                removeTransitions.append(transitions[j])
+                
+                # Ensure startPoint and arrowhead are properly standardized
+                startPoint = standardize_point(startPoint)
+                arrowhead = standardize_point(arrowhead)
+                
+                print("Start: ", startPoint)
+                print("end: ", arrowhead)  
+                
+                # Create merged transition
+                mergeTransitions.append({
+                    "type": transition_type,
+                    "start": startPoint,
+                    "end": arrowhead,
+                    "approx": merged_approx,
+                    "label": transitions[i]["label"]
+                })
+                
+                break  # break inner loop after merging
+    
+    # Remove the original transitions
+    for transition in removeTransitions:
+        if transition in transitions:
+            transitions.remove(transition)
+    
+    # Add the merged transitions
+    for transition in mergeTransitions:
+        transitions.append(transition)
+    
+    return transitions
+
+
+def getNodeID(props, point, pos, transition, margin = 8):
+    
+    # if all detected as plain line
+    if(props[0] == "plainLine"):
+        
+        decisionNodes = [props[1] for i in props[1]["type"] == "diamond"]
+        
+        return
+    
+    # [action, othernotations, label, text_arr]
+    allNodes = [props[0], props[1]]
+    
+    # for all arrow line
+    for nodes in allNodes:
+        for node in nodes:
+            x, y, w, h = node["bbox"]
+            px, py = point[0], point[1]
+            
+            if((x-margin <= px) and (x+w+margin >= px) and (y-margin <= py) and (y+h+margin > py)):
+                # inside thee action
+                node["hasConnection"] = True
+                
+                if pos not in node:
+                    node[pos] = []
+                
+                node[pos].append({
+                    "transitionID": transition.get("id")
+                })
+                return node["id"]
+            
+            
+            if node["type"] == "diamond":
+                allTextLabel = props[3]  # assuming props[3] = list of text labels
+                for textLabel in allTextLabel:
+                    tx, ty, tw, th, text = textLabel
+
+                    # Calculate bounding box edges
+                    node_left, node_top, node_right, node_bottom = x, y, x + w, y + h
+                    text_left, text_top, text_right, text_bottom = tx, ty, tx + tw, ty + th
+
+                    # Compute actual distance between boxes
+                    margin = 30
+                    
+                    # Calculate horizontal and vertical distances
+                    horizontal_dist = max(0, node_left - text_right, text_left - node_right)
+                    vertical_dist = max(0, node_top - text_bottom, text_top - node_bottom)
+                    
+                    # Calculate Euclidean distance between the closest points
+                    distance = (horizontal_dist**2 + vertical_dist**2)**0.5
+                    
+                    if distance <= margin and props[2] == text:
+                        print("Text near diamond node:", text)
+                        
+                        node["hasConnection"] = True
+                        
+                        if pos not in node:
+                            node[pos] = []
+                    
+                        node[pos].append({
+                            "transitionID": transition.get("id")
+                        })
+                        
+                        return node["id"]
+
+    return None
+
+
+def restructureData(rectangles, contours, texts):
+
+    # find the text inside the rectangles
+    actionNodes = []
+    transitions = []
+    otherNotations = []
+    
+    # find actions nodes
+    for rect in rectangles:
+        rx, ry, rw, rh = rect
+        actionTexts = []
+        
+        for text in texts:
+            tx, ty, tw, th, word = text         
+            if((rx < tx) and (tx + tw < rw) and (ry < ty) and (rh > (ty + th))):
+                actionTexts.append(text)
+                
+        txt = processText(actionTexts)
+        print("Text: ", txt)
+        actionNodes.append({
+            "id": "act" + str(len(actionNodes)+1),
+            "type": "ActionNode",
+            "bbox": (rx, ry, rw - rx, rh - ry),  # Store as (x, y, w, h)
+            "label": txt
+        })
+        
+        texts = [text for text in texts if text not in actionTexts]
+    
+    # merge text
+    text_merged = merge_nearby_texts(texts)
+    
+    # separate other notations to arrow
+    for contour in contours:          
+        if(contour["type"] in ["end node", "destruction node", "start node", "diamond node"]):
+            classification = contour["type"].split()[0]
+            bbox = cv2.boundingRect(contour["approx"])
+            print("Type :", classification, "node")                    
+            otherNotations.append({
+                "id": "notation" + str(len(otherNotations)+1),
+                "type": classification,
+                "bbox": bbox,
+            })
+
+        elif (contour["type"] in ["line", "directed arrow"]):
+            transitions.append(contour)
+        
+    print(text_merged) 
+    # print(len(transitions))
+    # merge transitions, arrow/lines
+    print("Old n = ", len(transitions))
+    transitions = mergeTransition(transitions, text_merged)
+    
+    # adding id for each transition
+    for i, transition in enumerate(transitions): 
+        transition["id"] = "line" + str(i + 1)
+         
+    
+    print(len(transitions))
+    print(len(actionNodes))
+    print(len(otherNotations))
+    
+    # restructure data
+    c = 0
+    
+    for transition in transitions:
+        c += 1
+        if (transition.get("type") == "directed arrow"):
+            start, end = transition.get("start"), transition.get("end")
+            
+            props = (actionNodes, otherNotations, transition.get("label"), text_merged)
+            
+            startingNodeID = getNodeID(props, start, "from", transition)
+            destinationNodeID = getNodeID(props, end, "to", transition)    
+
+            print(
+                "start: ", startingNodeID,
+                "end: ", destinationNodeID
+            )
+        
+        
+    for actionNode in actionNodes:
+        if(actionNode.get("hasConnection") is not None):
+            print(
+                actionNode["id"], 
+                actionNode["hasConnection"],
+                actionNode["bbox"], 
+                " From ", len(actionNode.get("from", [])), 
+                " TO ", len(actionNode.get("to", []))
+            )
+    
+    structuredData = {
+        "nodes": [],
+        "transitions": []
+    }
+    
+    for node in actionNodes:
+        structuredData["nodes"].append({
+            "id": node.get("id"),
+            "type": node.get("type"),
+            "bbox": [int(x) for x in node["bbox"]],
+            "label": node.get("label"),
+            "from": node.get("from", None),
+            "to": node.get("to", None),
+        })
+    
+    for notation in otherNotations:
+        structuredData["nodes"].append({
+            "id": notation["id"],
+            "type": notation["type"],
+            "bbox": [int(x) for x in notation["bbox"]],
+            "from": notation.get("from", None),
+            "to": notation.get("to", None)
+        })
+    
+    for transition in transitions:
+        transition_data = {
+            "id": transition["id"],
+            "type": transition["type"],
+            "start": [int(transition["start"][0]), int(transition["start"][1])],
+            "end": [int(transition["end"][0]), int(transition["end"][1])]
+        }
+        if "label" in transition:
+            transition_data["label"] = transition["label"]
+            
+        structuredData["transitions"].append(transition_data)
+    
+    return structuredData 
+
 
 
 def downloadImage(image):
@@ -684,24 +1141,42 @@ def main(image_path):
     print("Contours: ", len(contours))
     
     # --- 3. OCR + bounding box info ---
-    data = pytesseract.image_to_data(textImg, output_type=Output.DICT)
-    d1 = pytesseract.image_to_string(textImg)
+    textData = pytesseract.image_to_data(textImg, output_type=Output.DICT)
+    # d1 = pytesseract.image_to_string(textImg)
     # --- 4. Convert grayscale to BGR for drawing ---
     textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
 
     # --- 5. Draw bounding boxes ---
-    n_boxes = len(data['level'])
+    n_boxes = len(textData['level'])
     for i in range(n_boxes):
-        text = data['text'][i].strip()
-        conf = int(data['conf'][i])
+        text = textData['text'][i].strip()
+        conf = int(textData['conf'][i])
 
         if text != "":  # filter low confidence or empty
-            (x, y, w, h) = (data['left'][i], data['top'][i], data['width'][i], data['height'][i])
+            (x, y, w, h) = (textData['left'][i], textData['top'][i], textData['width'][i], textData['height'][i])
             cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-   
+
+    texts = []
+    for i in range(len(textData['text'])):
+        text = textData['text'][i].strip()
+        if text != "":  # ignore empty OCR outputs
+            x = int(textData['left'][i])
+            y = int(textData['top'][i])
+            w = int(textData['width'][i])
+            h = int(textData['height'][i])
+            texts.append((x, y, w, h, text))
+    
+    
+    structuredData = restructureData(rectangles, contours, texts)
+    
+    print(json.dumps(structuredData, indent=2))
+    
+    
     # visualize(thresh, drawContour, image2)
     visualize(image, drawContour, textImg)
 
+
 # ---------------- Run ----------------
-main("./images/std4.png")
+main("./images/atmwithdrawal.png")
+
