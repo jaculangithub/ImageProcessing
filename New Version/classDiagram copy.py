@@ -191,6 +191,7 @@ def classify_relationship(contours, hierarchy, idx):
         # Return endpoints but no start/end direction
         return relationship_type, None, None, point1, point2, approx
 
+
 def find_farthest_points(approx_points):
     """Find the two points with maximum distance in a set of points."""
     points = np.squeeze(approx_points)  # Handle (N,1,2) → (N,2)
@@ -228,6 +229,7 @@ def determine_start_end_with_child(point1, point2, child_approx):
         return point2, point1  # point1 is end (closer to symbol)
     else:
         return point1, point2  # point2 is end (closer to symbol)
+
 
 def determine_start_end_five_sequence(point1, point2, approx):
     """Determine start/end for 5-point sequence (filled diamond)."""
@@ -654,7 +656,6 @@ def downloadImage(image):
     # cv2.imwrite("./images/atm.png", image)
     return None
 
-
 def detect_separator_lines_in_rectangle(rectangle, image):
     """Detect vertical separator lines within a rectangle"""
     x1, y1, x2, y2 = rectangle
@@ -829,6 +830,7 @@ def find_closest_relationship(contours, x, y):
     
     return closest_relationship
 
+
 def find_closest_class_from_rectangles(rectangles, x, y):
     """Find the class rectangle closest to the given point"""
     closest_class = None
@@ -846,6 +848,7 @@ def find_closest_class_from_rectangles(rectangles, x, y):
             closest_class = i
     
     return closest_class
+
 
 def find_multiplicity_for_endpoint(multiplicities, relationship_index, contour, endpoint):
     """Find multiplicity for a specific relationship endpoint"""
@@ -869,6 +872,7 @@ def find_multiplicity_for_endpoint(multiplicities, relationship_index, contour, 
                 closest_multiplicity = multiplicity['text']
     
     return closest_multiplicity
+
 
 def process_relationships_with_multiplicities(contours, classes, multiplicities):
     """Process relationships and attach multiplicities directly"""
@@ -919,10 +923,123 @@ def process_relationships_with_multiplicities(contours, classes, multiplicities)
     
     return relationships
 
+
+# def reStructureData(rectangles, contours, ocrData, original_image):
+#     structuredData = {
+#         'classes': [],
+#         'relationships': []  # Multiplicities are stored directly in relationships
+#     }
+    
+#     # Separate text into inside and outside class rectangles
+#     inside_texts = []
+#     outside_texts = []
+    
+#     n_boxes = len(ocrData['level'])
+#     for j in range(n_boxes):
+#         text = ocrData['text'][j].strip()
+#         x = ocrData['left'][j]
+#         y = ocrData['top'][j]
+#         w = ocrData['width'][j]
+#         h = ocrData['height'][j]
+        
+#         if not text:
+#             continue
+            
+#         # Check if text is inside ANY rectangle
+#         text_inside_any_rect = False
+#         for rect in rectangles:
+#             rx1, ry1, rx2, ry2 = rect
+#             if (x >= rx1 and y >= ry1 and (x + w) <= rx2 and (y + h) <= ry2):
+#                 text_inside_any_rect = True
+#                 break
+        
+#         if text_inside_any_rect:
+#             inside_texts.append({
+#                 'text': text, 'x': x, 'y': y, 'w': w, 'h': h
+#             })
+#         else:
+#             outside_texts.append({
+#                 'text': text, 'x': x, 'y': y, 'w': w, 'h': h
+#             })
+    
+#     print(f"Found {len(inside_texts)} text elements inside classes")
+#     print(f"Found {len(outside_texts)} text elements outside classes")
+    
+#     # Process rectangles as classes (using only inside texts)
+#     for i, rect in enumerate(rectangles):
+#         x1, y1, x2, y2 = rect
+        
+#         # Detect separator lines for this rectangle
+#         line1_y, line2_y = detect_separator_lines_in_rectangle(rect, original_image)
+#         print(f"Class {i+1} separators: Line1 at {line1_y}, Line2 at {line2_y}")
+        
+#         # Find text within THIS specific rectangle area
+#         class_name_texts = []
+#         attribute_texts = []
+#         method_texts = []
+        
+#         for text_item in inside_texts:
+#             x = text_item['x']
+#             y = text_item['y']
+#             w = text_item['w']
+#             h = text_item['h']
+#             text = text_item['text']
+            
+#             # Check if text is inside this specific rectangle
+#             if (x >= x1 and y >= y1 and (x + w) <= x2 and (y + h) <= y2):
+                
+#                 # Calculate text center Y position
+#                 text_center_y = y + h/2
+                
+#                 # Classify text based on separator lines
+#                 if text_center_y < line1_y:
+#                     # Above first line - Class name
+#                     class_name_texts.append({
+#                         'y': y, 'text': text, 'x': x
+#                     })
+#                 elif line1_y <= text_center_y <= line2_y:
+#                     # Between two lines - Attributes
+#                     attribute_texts.append({
+#                         'y': y, 'text': text, 'x': x
+#                     })
+#                 else:
+#                     # Below second line - Methods
+#                     method_texts.append({
+#                         'y': y, 'text': text, 'x': x
+#                     })
+        
+#         # Process class name
+#         class_name = f"Class{i+1}"
+#         if class_name_texts:
+#             class_name_texts.sort(key=lambda item: (item['y'], item['x']))
+#             class_name = ' '.join(item['text'] for item in class_name_texts)
+        
+#         # Process attributes and methods with access modifiers
+#         attributes = process_text_lines_with_modifiers(attribute_texts)
+#         methods = process_text_lines_with_modifiers(method_texts)
+        
+#         class_info = {
+#             'name': class_name,
+#             'attributes': attributes,
+#             'methods': methods,
+#             'position': (x1, y1, x2, y2)
+#         }
+#         structuredData['classes'].append(class_info)
+    
+#     # Process outside texts as multiplicities
+#     multiplicities = process_multiplicities(outside_texts, contours, rectangles)
+    
+#     # Process relationships with multiplicities attached
+#     structuredData['relationships'] = process_relationships_with_multiplicities(
+#         contours, structuredData['classes'], multiplicities
+#     )
+    
+#     return structuredData
+
 def reStructureData(rectangles, contours, ocrData, original_image):
     structuredData = {
-        'classes': [],
-        'relationships': []  # Multiplicities are stored directly in relationships
+        'nodes': [],  # Changed from 'classes' to 'nodes'
+        'transitions': []  # Changed from 'relationships' to 'transitions'
     }
     
     # Separate text into inside and outside class rectangles
@@ -960,7 +1077,7 @@ def reStructureData(rectangles, contours, ocrData, original_image):
     print(f"Found {len(inside_texts)} text elements inside classes")
     print(f"Found {len(outside_texts)} text elements outside classes")
     
-    # Process rectangles as classes (using only inside texts)
+    # Process rectangles as nodes (using only inside texts)
     for i, rect in enumerate(rectangles):
         x1, y1, x2, y2 = rect
         
@@ -1013,60 +1130,151 @@ def reStructureData(rectangles, contours, ocrData, original_image):
         attributes = process_text_lines_with_modifiers(attribute_texts)
         methods = process_text_lines_with_modifiers(method_texts)
         
-        class_info = {
-            'name': class_name,
+        # Create node in activity diagram format
+        node_info = {
+            'id': f"class{i+1}",
+            'type': 'ClassNode',
+            'bbox': [x1, y1, x2 - x1, y2 - y1],  # Convert to [x, y, w, h]
+            'label': class_name,
             'attributes': attributes,
             'methods': methods,
-            'position': (x1, y1, x2, y2)
+            'hasConnection': False  # Will be updated when connections are found
         }
-        structuredData['classes'].append(class_info)
+        structuredData['nodes'].append(node_info)
     
     # Process outside texts as multiplicities
     multiplicities = process_multiplicities(outside_texts, contours, rectangles)
     
-    # Process relationships with multiplicities attached
-    structuredData['relationships'] = process_relationships_with_multiplicities(
-        contours, structuredData['classes'], multiplicities
+    # Process relationships as transitions in activity diagram format
+    relationships = process_relationships_with_multiplicities(
+        contours, [{'name': node['id'], 'position': node['bbox']} for node in structuredData['nodes']], multiplicities
     )
+    
+    # Convert relationships to transitions format
+    for i, rel in enumerate(relationships):
+        # Find the start and end points for this relationship from contours
+        start_point = None
+        end_point = None
+        
+        # Find the corresponding contour for this relationship
+        for cont in contours:
+            if cont['start'] and cont['end']:
+                # Check if this contour connects the same classes
+                start_class = find_closest_class([{'name': node['id'], 'position': node['bbox']} for node in structuredData['nodes']], cont['start'][0], cont['start'][1])
+                end_class = find_closest_class([{'name': node['id'], 'position': node['bbox']} for node in structuredData['nodes']], cont['end'][0], cont['end'][1])
+                
+                if start_class == rel['from_class'] and end_class == rel['to_class']:
+                    start_point = [int(cont['start'][0]), int(cont['start'][1])]
+                    end_point = [int(cont['end'][0]), int(cont['end'][1])]
+                    break
+        
+        # If no exact match found, use p1 and p2 as fallback
+        if not start_point and contours[i]['p1']:
+            start_point = [int(contours[i]['p1'][0]), int(contours[i]['p1'][1])]
+        if not end_point and contours[i]['p2']:
+            end_point = [int(contours[i]['p2'][0]), int(contours[i]['p2'][1])]
+        
+        # Determine end symbol based on relationship type
+        end_symbol = get_end_symbol(rel['relationship_type'])
+        
+        transition_info = {
+            'id': f"rel{i+1}",
+            'type': 'directed arrow',
+            'start': start_point,
+            'end': end_point,
+            'label': f"{rel['multiplicities']['from_end'] or '1'} - {rel['multiplicities']['to_end'] or '1'}",
+            'endSymbol': end_symbol,
+            'from': rel['from_class'],
+            'to': rel['to_class']
+        }
+        structuredData['transitions'].append(transition_info)
+        
+        # Update hasConnection for connected nodes
+        for node in structuredData['nodes']:
+            if node['id'] == rel['from_class'] or node['id'] == rel['to_class']:
+                node['hasConnection'] = True
     
     return structuredData
 
+def get_end_symbol(relationship_type):
+    """Determine the end symbol for different relationship types"""
+    symbol_mapping = {
+        'inheritance': 'unfilled arrow',
+        'composition': 'filled diamond', 
+        'aggregation': 'unfilled diamond',
+        'association': 'none',
+        'dependency': 'dashed arrow'
+    }
+    return symbol_mapping.get(relationship_type, 'none')
+
 def print_structured_data(structuredData):
-    """Print the complete structured data in a readable format"""
+    """Print the complete structured data in activity diagram format"""
     print("\n" + "="*80)
-    print("COMPLETE UML STRUCTURED DATA")
+    print("CLASS DIAGRAM STRUCTURED DATA (Activity Diagram Format)")
     print("="*80)
     
-    print("\nCLASSES:")
+    print("\nNODES:")
     print("-" * 40)
-    for i, class_info in enumerate(structuredData['classes']):
-        print(f"\n{i+1}. {class_info['name']} {class_info['position']}")
+    for node in structuredData['nodes']:
+        print(f"\n{node['id']}: {node['label']} {node['bbox']}")
+        print(f"  Type: {node['type']}")
+        print(f"  Has Connection: {node['hasConnection']}")
         
-        print("   Attributes:")
-        for attr in class_info['attributes']:
-            print(f"     [{attr[0]}] {attr[1]}")
+        print("  Attributes:")
+        for attr in node['attributes']:
+            print(f"    [{attr[0]}] {attr[1]}")
             
-        print("   Methods:")
-        for method in class_info['methods']:
-            print(f"     [{method[0]}] {method[1]}")
+        print("  Methods:")
+        for method in node['methods']:
+            print(f"    [{method[0]}] {method[1]}")
     
-    print("\nRELATIONSHIPS:")
+    print("\nTRANSITIONS:")
     print("-" * 40)
-    for i, rel in enumerate(structuredData['relationships']):
-        from_mult = rel['multiplicities']['from_end'] or '1'
-        to_mult = rel['multiplicities']['to_end'] or '1'
+    for transition in structuredData['transitions']:
+        print(f"\n{transition['id']}: {transition['from']} -> {transition['to']}")
+        print(f"  Type: {transition['type']}")
+        print(f"  Start: {transition['start']}")
+        print(f"  End: {transition['end']}")
+        print(f"  Label: {transition['label']}")
+        print(f"  End Symbol: {transition['endSymbol']}")
+
+
+# def print_structured_data(structuredData):
+#     """Print the complete structured data in a readable format"""
+#     print("\n" + "="*80)
+#     print("COMPLETE UML STRUCTURED DATA")
+#     print("="*80)
+    
+#     print("\nCLASSES:")
+#     print("-" * 40)
+#     for i, class_info in enumerate(structuredData['classes']):
+#         print(f"\n{i+1}. {class_info['name']} {class_info['position']}")
         
-        print(f"\n{i+1}. {rel['from_class']}[{from_mult}] -- {rel['relationship_type']} --> {rel['to_class']}[{to_mult}]")
+#         print("   Attributes:")
+#         for attr in class_info['attributes']:
+#             print(f"     [{attr[0]}] {attr[1]}")
+            
+#         print("   Methods:")
+#         for method in class_info['methods']:
+#             print(f"     [{method[0]}] {method[1]}")
+    
+#     print("\nRELATIONSHIPS:")
+#     print("-" * 40)
+#     for i, rel in enumerate(structuredData['relationships']):
+#         from_mult = rel['multiplicities']['from_end'] or '1'
+#         to_mult = rel['multiplicities']['to_end'] or '1'
         
-        # Relationship explanations
-        explanations = {
-            'inheritance': f"    {rel['to_class']} is parent of {rel['from_class']}",
-            'composition': f"    {rel['from_class']} contains {rel['to_class']} (strong ownership)",
-            'aggregation': f"    {rel['from_class']} uses {rel['to_class']} (weak ownership)",
-            'association': f"    {rel['from_class']} is associated with {rel['to_class']}",
-            'dependency': f"    {rel['from_class']} depends on {rel['to_class']}"
-        }
-        print(explanations.get(rel['relationship_type'], "    Unknown relationship type"))
+#         print(f"\n{i+1}. {rel['from_class']}[{from_mult}] -- {rel['relationship_type']} --> {rel['to_class']}[{to_mult}]")
+        
+#         # Relationship explanations
+#         explanations = {
+#             'inheritance': f"    {rel['to_class']} is parent of {rel['from_class']}",
+#             'composition': f"    {rel['from_class']} contains {rel['to_class']} (strong ownership)",
+#             'aggregation': f"    {rel['from_class']} uses {rel['to_class']} (weak ownership)",
+#             'association': f"    {rel['from_class']} is associated with {rel['to_class']}",
+#             'dependency': f"    {rel['from_class']} depends on {rel['to_class']}"
+#         }
+#         print(explanations.get(rel['relationship_type'], "    Unknown relationship type"))
 
 
 # ---------------- Main workflow ----------------
@@ -1140,8 +1348,11 @@ def main(image_path):
     # Print the complete structured data
     print_structured_data(structuredData)
    
+    import json
+    print(json.dumps(structuredData, indent=2))
+   
     visualize(textImg, drawContour, image2)
 
 
 # ---------------- Run ----------------
-main("./images/cd_comp.png")
+main("./images/cd7.png")

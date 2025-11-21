@@ -1,16 +1,15 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import math 
 import pytesseract
 from pytesseract import Output
 import json
+import time
 
 epsilon_ratio = 0.04
 
 # ---------------- Step 0: Load image ----------------
-def load_image(path):
-    image = cv2.imread(path)
+def load_image_from_file(file):
+    image = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return image, gray
 
@@ -48,7 +47,6 @@ def find_vertical_pairs(segments, y_tol=5, h_tol=5):
    
     return pairs
 
-
 def find_horizontal_pairs(segments, x_tol=5, w_tol=5):
     pairs = []
     
@@ -58,7 +56,6 @@ def find_horizontal_pairs(segments, x_tol=5, w_tol=5):
             x2, y2, w2, h2 = segments[j]
             if abs(x1 - x2) <= x_tol and abs(w1 - w2) <= w_tol:
                 pairs.append((segments[i], segments[j]))
-
     
     return pairs
 
@@ -138,7 +135,6 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
     
     return image_rect
 
-
 def find_farthest_points(approx_points):
     """Find the two points with maximum distance in a set of points."""
     points = np.squeeze(approx_points)  # Handle (N,1,2) → (N,2)
@@ -160,7 +156,6 @@ def find_farthest_points(approx_points):
     
     return point1, point2, max_distance
 
-
 def determine_start_end_five_sequence(point1, point2, approx):
     """Determine start/end for 5-point sequence (filled diamond)."""
     points = np.squeeze(approx)
@@ -175,9 +170,6 @@ def determine_start_end_five_sequence(point1, point2, approx):
     point1_in_seq = any(np.array_equal(np.array(point1), seq_point) for seq_point in five_seq_points)
     point2_in_seq = any(np.array_equal(np.array(point2), seq_point) for seq_point in five_seq_points)
     
-    if point1_in_seq and point2_in_seq:
-        print("Both meron")
-    
     # The point in the sequence is the end (diamond side)   
     if point1_in_seq and not point2_in_seq:
         return point2, point1  # point1 is end
@@ -185,9 +177,7 @@ def determine_start_end_five_sequence(point1, point2, approx):
         return point1, point2  # point2 is end
     else:
         # Both or neither in sequence, return as plain association
-        # print("Both wala")
         return None, None
-
 
 def find_five_point_sequence(points, point1, point2, min_tolerance=5, tolerance_percent=0.25):
     """Find and return the 5-point sequence if it exists."""
@@ -211,10 +201,8 @@ def find_five_point_sequence(points, point1, point2, min_tolerance=5, tolerance_
         
         # If both farthest points are in this sequence, skip it
         if point1_in_seq and point2_in_seq:
-            # print(f"Skipping sequence at start {start} - contains both farthest points")
             continue  # ✅ Skip to next sequence
         
-    
         # Only calculate distances if we didn't skip
         for i in range(4):
             p1 = seq_points[i]
@@ -234,25 +222,17 @@ def find_five_point_sequence(points, point1, point2, min_tolerance=5, tolerance_
         
         dynamic_tolerance = max_dist - scaled_min
         
-        # print("Distances: ", distances, " Max: ", max_dist, " Min: ", min_dist, " Avg: ", avg_distance, " Scaled Min: ", scaled_min, " Dynamic Tol: ", dynamic_tolerance)
-        
         if max(distances) - min(distances) <= dynamic_tolerance+5:
             seq_np = np.array(seq_points, dtype=np.int32)
             hull = cv2.convexHull(seq_np, returnPoints=True)
             hull_count = len(hull)
-            # print("NSEq ",len(seq_points))
-            # print("Hull ", hull_count)
-            # print("Found! Convex Hull Points: ", hull_count)
-            # print("Points: ", seq_points)
+            
             if hull_count >= 4:
                 return seq_points, hull_count
             elif hull_count == 3:
                 return seq_points, hull_count   
 
-    # print("No 5points found that don't contain both farthest points")
     return None, None
-
-
 
 def classify_based_on_child(contours, hierarchy, idx):
     """
@@ -277,7 +257,6 @@ def classify_based_on_child(contours, hierarchy, idx):
         
         # Check if child is circular (typical circle has circularity close to 1)
         if circularity > 0.7:  # High circularity indicates circle
-            # print(f"Found circular child - circularity: {circularity:.2f}")
             return "actor", None, None, cnt
         
         # Move to next sibling child
@@ -285,9 +264,7 @@ def classify_based_on_child(contours, hierarchy, idx):
     
     # If no circular child found, check for other child-based classifications
     return "unknown", None, None, cnt
-    
-   
-        
+
 def classify_contour(contours, hierarchy, idx):
     
     global epsilon_ratio
@@ -305,19 +282,16 @@ def classify_contour(contours, hierarchy, idx):
     if child_idx != -1  and h > 100:
         return classify_based_on_child(contours, hierarchy, idx)
     
-    
     # Calculate circularity (for start/end nodes)
     perimeter = cv2.arcLength(cnt, True)
     
     if perimeter > 0:
         circularity = 4 * np.pi * area / (perimeter * perimeter)
-    
     else:
         circularity = 0
     
     # Check for circular shape (start node)
     if bbox_area > 0 and (area / bbox_area) >= 0.75 and circularity >= 0.7 and h > 50:
-      
         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
         approx = cv2.approxPolyDP(cnt, epsilon, True)
         return "start node", None, None, approx
@@ -360,13 +334,8 @@ def classify_contour(contours, hierarchy, idx):
         
         point1, point2, max_distance = farthest_points 
         # check if the approx has 5points sequence 
-        # if(epsilon_ratio > 0.01): 
-        #     epsilon_ratio = epsilon_ratio / 2 
-        #     continue
-        
         has_five_seq, convexHull = find_five_point_sequence(approx, point1, point2)
         if has_five_seq and h < 50: #break if have 5-point sequence,
-         
             break
             # 0.02 to get the self message
         elif has_five_seq and len(bottom_points) > 5:
@@ -384,13 +353,11 @@ def classify_contour(contours, hierarchy, idx):
             return classification, start_point, end_point, approx
         
         elif convexHull and convexHull == 3:
-        
             classification = "asynchronous"
             start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
             
             return classification, start_point, end_point, approx
         elif convexHull and convexHull <= 5:
-           
             classification = "synchronous"
             start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
             return classification, start_point, end_point, approx
@@ -398,8 +365,7 @@ def classify_contour(contours, hierarchy, idx):
             classification = "line" 
             return "line", None, None, approx
     return "line", None, None, approx
-         
-        
+
 def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
     threshImg = threshold_image(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
@@ -432,9 +398,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             r = rect    
             # Check if contour bbox is within rectangle bbox
             if x >= rx1 and y >= ry1 and (x + w) <= rx2 and (y + h) <= ry2:
-                # Fill rectangle area with background color to remove it
-                # inTheRect = True
-                # check if the contour is in the corner of the bounding box
                 # Define corner size (adjust based on your needs)
                 corner_size = 5  # pixels
                 
@@ -460,7 +423,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 
                 if is_in_corner:
                     cv2.rectangle(detectText, (x, y), (x + w, y + h), bg_color, -1)  # Fill the whole bounding box
-                    # cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
             
                 break  # No need to check other rectangles
             
@@ -498,40 +460,20 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                     
                   # If not added to any group, create a new one
                 if not added:
-               
                     dashLineArr.append([cnt])
 
                 continue  # Skip further processing for dash contours
             
             cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
             
-            # Draw bounding box
-            cv2.rectangle(contour_img, (x - 1, y - 1), (x + w, y + h), (0, 255, 0), 1)
-            cv2.putText(contour_img, str(count) + " " + str(classification), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, (0, 0, 255), 1, cv2.LINE_AA)
-
-            # # Draw approx points
-            epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, epsilon, True)
-
             contours_info.append({
                 "type": classification,
                 "start" : start_point, 
                 "end": end_point,
                 "approx": approx,
             })
-        
-            for pt in approx:
-                cv2.circle(contour_img, tuple(pt[0]), 1, (255, 0, 0), -1)
 
-
-    # print("58: ", contours_info)
-    # print("Dash line groups details:", len(dashLineArr))
-    c = 0
-    loopContour = set()
-    altContour = set()
-    
-    # NEW: Process dash line groups to determine start/end for reply messages
+    # Process dash line groups to determine start/end for reply messages
     for group in dashLineArr:
         # Flatten all points from contours in the group
         all_points = np.vstack([cnt.reshape(-1, 2) for cnt in group])  # shape: (N, 2)
@@ -555,7 +497,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             if(abs(x2 - x1) < 50) and (y2-y1) < 200: continue
             if(group_min_x <= x1 + 20 and group_max_x >= x2-20):                
                 isDashLineSeparator = True
-                altContour.add(rect)
                 break
             
         if isDashLineSeparator:
@@ -570,8 +511,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
         first_approx_points = len(first_contour)
         last_approx_points = len(last_contour)
-
-        # print(f"Dash Group {c+1}: First contour points: {first_approx_points}, Last contour points: {last_approx_points}")
 
         # Determine start and end based on arrowhead position
         if last_approx_points > 4:
@@ -599,8 +538,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             start_point = (start_x + start_w, start_y + start_h//2)
             end_point = (end_x, end_y + end_h//2)
 
-        c += 1
-
         # Add as reply message with all points stored in "approx"
         contours_info.append({
             "type": "reply",
@@ -610,49 +547,12 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             "segment_count": len(group),
             "approx": all_points  # all dash line points
         })
-
-        # Draw bounding box for the group
-        cv2.rectangle(contour_img, (group_min_x, group_min_y), (group_max_x, group_max_y), (0, 255, 255), 2)
-
-        # Draw direction arrow
-        cv2.arrowedLine(contour_img, start_point, end_point, (255, 0, 255), 2, tipLength=0.05)
-
-        cv2.putText(contour_img, f"Reply {c} ({direction})", 
-                    (group_min_x, group_min_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.5, (0, 0, 255), 1, cv2.LINE_AA)
-
+            
     for rect in rectangles:
         x1, y1, x2, y2 = rect
 
         if (x2-x1 < 100): continue
 
-        if rect not in altContour:
-            print(x1, " ", y1, " " , x2, " ", y2)
-            loopContour.add(rect)
-            
-    
-    for rect in altContour:
-        x1, y1, x2, y2 = rect
-    
-        # Create proper contour array from rectangle coordinates
-        contour_points = np.array([
-            [[x1, y1]],     # Top-left
-            [[x2, y1]],     # Top-right  
-            [[x2, y2]],     # Bottom-right
-            [[x1, y2]]      # Bottom-left
-        ], dtype=np.int32)
-        
-        contours_info.append({
-            "type": "alt",
-            "start": None, 
-            "end": None,
-            "approx": contour_points,  # Proper contour array
-        })
-        cv2.rectangle(contour_img, (x1, y1), (x2, y2), (0, 0, 255), 1)        
-            
-    for rect in loopContour:
-        
-        x1, y1, x2, y2 = rect
         # Create proper contour array from rectangle coordinates
         contour_points = np.array([
             [[x1, y1]],     # Top-left
@@ -667,40 +567,8 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             "end": None,
             "approx": contour_points,  # Proper contour array
         })
-        
-        cv2.rectangle(contour_img, (x1, y1), (x2, y2), (255, 0, 0), 1)
-    
     
     return contours_info, hierarchy, detectedContours, contour_img, detectText
-
-
-# ---------------- Step 7: Visualization ----------------
-def visualize(vertical_lines, horizontal_lines, image_rect):
-    plt.figure(figsize=(12,6))
-    
-    plt.subplot(1,3,1)
-    plt.title("Image 3")
-    plt.imshow(vertical_lines, cmap="gray")
-    plt.axis("off")
-    
-    plt.subplot(1,3,2)
-    plt.title("Image 2")
-    plt.imshow(horizontal_lines, cmap="gray")
-    plt.axis("off")
-    
-    plt.subplot(1,3,3)
-    plt.title("Image 3")
-    plt.imshow(cv2.cvtColor(image_rect, cv2.COLOR_BGR2RGB))
-    plt.axis("off")
-    
-    plt.tight_layout()
-    plt.show()
-
-
-def downloadImage(image):
-    # cv2.imwrite("./images/atm.png", image)
-    return None
-
 
 def is_text_near_rect(tx, ty, tw, th, rect_x, rect_y, rect_w, rect_h, max_dist=10):
     # center of text
@@ -717,7 +585,6 @@ def is_text_near_rect(tx, ty, tw, th, rect_x, rect_y, rect_w, rect_h, max_dist=1
 
     # if distance is smaller than max_dist in either direction, consider near
     return dist_x <= max_dist and dist_y <= max_dist
-
 
 def extract_text_in_region(rect, texts, contourType):
     matched_text = None
@@ -966,7 +833,6 @@ def extract_text_in_region(rect, texts, contourType):
         
     return matched_text
 
-
 def restructureData(rectangles, contours, texts):
     objectNodes = []
     messages = []
@@ -976,9 +842,7 @@ def restructureData(rectangles, contours, texts):
     messageID = 0
     notationID = 0
     text = ""
-    hasDeleteMessage = False
     
-    print("Text: ", len(texts))
     for cont in contours:   
         classification = cont["type"]
         startPoint = cont["start"]
@@ -986,7 +850,6 @@ def restructureData(rectangles, contours, texts):
         text = ""
         
         if (classification == "asynchronous" or classification == "synchronous" or classification == "self" or classification == "reply"):
-        
             text = extract_text_in_region(cont, texts, "message")
             messages.append({
                 "messageID": "msg" + str(messageID),
@@ -995,18 +858,13 @@ def restructureData(rectangles, contours, texts):
                 "end": endPoint,
                 "label": text,
             })
-        
             messageID += 1
             
-            print(classification, " : ", text)
-        
         else :
-            # if classification == "alt" or classification == "loop": continue
             x, y, w, h = cv2.boundingRect(cont["approx"])
             text = None
             
             if(classification == "alt" or classification == "loop"):
-               
                 if classification == "alt":    
                     conditions = extract_text_in_region(cont, texts, classification)
                     ifCondition = None
@@ -1017,8 +875,6 @@ def restructureData(rectangles, contours, texts):
                     else:
                         ifCondition = ""
                         elseCondition = ""
-                    print("If ", ifCondition)
-                    print("Else ", elseCondition)
                     notations.append({
                         "notationID": "notation" + str(notationID),
                         "type": classification,
@@ -1026,10 +882,7 @@ def restructureData(rectangles, contours, texts):
                         "ifCondition": ifCondition,
                         "elseCondition": elseCondition,
                     })
-                    print()
-                    
                 else:
-                    # continue
                     # check if the contour has message
                     isALoop = False
                     
@@ -1037,13 +890,7 @@ def restructureData(rectangles, contours, texts):
                         if(msgContour is cont): continue
                         if msgContour["type"] in {"loop", "obj", "alt", "delete", "start node", "actor"} :
                             continue
-                        print("===================")
                         mx, my, mw, mh = cv2.boundingRect(msgContour["approx"])
-                        print(mx, " ", my, " ", mw, " ", mh)
-                        print(x, " ", y, " ", w, " ", h)
-                        
-                        print("===================")
-                        # print("type ", msgContour["type"])
                         if(mx > x) and (mw+mx < x+w):
                             isALoop = True                     
                             break
@@ -1052,20 +899,16 @@ def restructureData(rectangles, contours, texts):
                     label = ""
                     if isALoop: 
                         notationType = "loop"
-                        label = extract_text_in_region(cont, texts, notationType)  # ✅ Reusable call
+                        label = extract_text_in_region(cont, texts, notationType)
                     else: 
                         notationType = "obj"
-                        label = extract_text_in_region((x,y,w,h), texts, notationType)  # ✅ Reusable call
-                    print()
-                    print("ID: ", notationID)
-                    print("Classification: 696", notationType)
-                    print("Label: 670", label)
+                        label = extract_text_in_region((x,y,w,h), texts, notationType)
                   
                     notations.append({
                         "notationID": "notation" + str(notationID),
                         "type": notationType,
                         "bbox": {"x": x, "y": y, "w": w, "h": h},
-                        "label": label  # None if no label found
+                        "label": label
                     })         
 
             else:
@@ -1078,13 +921,7 @@ def restructureData(rectangles, contours, texts):
                 })
             
             notationID += 1
-            print(classification, " : ", text)
 
-    print(len(texts))
-    
-    print("Msg: ", len(messages))
-    print("Notation: ", len(notations))
-    # return
     for msg in messages:
         start_point = msg["start"]
         end_point = msg["end"]
@@ -1093,25 +930,12 @@ def restructureData(rectangles, contours, texts):
         receiver = None
 
         if start_point is not None:
-            sender = find_nearby_notation(start_point, notations)  # Check if pointing to X/delete node
+            sender = find_nearby_notation(start_point, notations)
         if end_point is not None:
-            receiver = find_nearby_notation(end_point, notations)  # Check if pointing to X/delete node
-
-        # If not found, check objects - only if points are not None
-        if sender is None and start_point is not None:
-            sender = find_nearby_object(start_point, objectNodes)  # Fall back to regular objects
-            
-        if receiver is None and end_point is not None:
-            receiver = find_nearby_object(end_point, objectNodes)  # Fall back to regular objects
+            receiver = find_nearby_notation(end_point, notations)
 
         if sender is None and msg["type"] == "self":
             sender = receiver
-        
-        print(msg["type"])
-        print("Start point:", start_point, "-> sender:", sender , )
-        print("End point:", end_point, "-> receiver:", receiver)
-        print(" message ",msg["label"])
-        print()
         
         msg["from"] = sender
         msg["to"] = receiver
@@ -1126,15 +950,11 @@ def restructureData(rectangles, contours, texts):
             parent_object = None
             for obj in notations:
                 # Skip if it's not an object or if it's the same delete notation
-                print("Type ", obj["type"])
                 if obj["type"] == "obj":
-                    print("hello2")
                     ox, oy, ow, oh = obj["bbox"]["x"], obj["bbox"]["y"], obj["bbox"]["w"], obj["bbox"]["h"]
                     
                     # Check if delete notation is inside this object's bounding box
                     margin = 5
-                    print(nx, " ", ny, " ", nw, " ", nh)
-                    print(ox, " ", oy, " ", ow, " ", oh)
                     if (ox <= nx and 
                         nx + nw <= ow+ox):
                         parent_object = obj
@@ -1191,7 +1011,6 @@ def restructureData(rectangles, contours, texts):
             "endPoint": msg.get("end")
         })
         
-         # === PASTE THE BLOCK RIGHT HERE ===
     def convert_numpy_types(obj):
         """Recursively convert numpy types to Python native types for JSON serialization"""
         if isinstance(obj, dict):
@@ -1213,22 +1032,8 @@ def restructureData(rectangles, contours, texts):
 
     # Apply conversion to the entire result structure
     result = convert_numpy_types(result)
-    # === END OF PASTED BLOCK ===
     
     return result
-    
-
-def find_nearby_object(point, objects, margin=5):
-    px, py = point
-    for obj in objects:
-        if(obj["type"] != "obj"): 
-            continue
-        x, y, w, h = obj["bbox"]["x"], obj["bbox"]["y"], obj["bbox"]["w"], obj["bbox"]["h"]
-        # check if point is inside box with margin
-        if (px >= x - margin) and (px <= x + w + margin) :
-            return str(obj["notationID"])
-    return None
-
 
 def find_nearby_notation(point, notations, margin=5):
     px, py = point
@@ -1239,18 +1044,9 @@ def find_nearby_notation(point, notations, margin=5):
             return (str(note["notationID"]))
     return None
 
-
 def merge_nearby_texts(texts, x_margin=10, y_margin=5, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
     """
     Merge nearby text boxes into sentences while ignoring vertical dash-like noise.
-    
-    :param texts: list of tuples (x, y, w, h, text)
-    :param x_margin: horizontal gap threshold to merge
-    :param y_margin: vertical gap threshold to consider same line
-    :param dash_width_threshold: max width to consider as dash noise
-    :param align_threshold: max allowed difference in X to consider aligned
-    :param min_vertical_group: number of aligned small-width texts to be considered noise
-    :return: merged list of tuples (x, y, w, h, sentence)
     """
     if not texts:
         return []
@@ -1312,10 +1108,12 @@ def merge_nearby_texts(texts, x_margin=10, y_margin=5, dash_width_threshold=5, a
 
     return merged_texts
 
-
 # ---------------- Main workflow ----------------
-def main(image_path):
-    image, gray = load_image(image_path)
+def process_sequence_diagram(file):
+    
+    start_time = time.time()
+    
+    image, gray = load_image_from_file(file)
     thresh = threshold_image(gray)
     vertical_lines, horizontal_lines = extract_lines(thresh)
     
@@ -1334,30 +1132,12 @@ def main(image_path):
     
     # ==================== Preprocess again the image that after removing teh rect =============================== 
     noRectImg = image_rect.copy()      #copy image after removing rectangles
-    # threshImg = threshold_image(cv2.cvtColor(noRectImg, cv2.COLOR_BGR2GRAY))    #threshold again
     
     contours, hierarchy, detectedContours, drawContour, textImg = detect_contours(noRectImg, rectangles)
-    # downloadImage(textImg)
-    image2 = image.copy()
     
-    # --- 3. OCR + bounding box info ---
+    # --- OCR + bounding box info ---
     textData = pytesseract.image_to_data(textImg, output_type=Output.DICT)
-    d1 = pytesseract.image_to_string(textImg)
-    # --- 4. Convert grayscale to BGR for drawing ---
-    textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
-    print("Contour ", len(contours))
-    # --- 5. Draw bounding boxes ---
-    n_boxes = len(textData['level'])
-    for i in range(n_boxes):
-        text = textData['text'][i].strip()
-        conf = int(textData['conf'][i])
 
-        if text != "":  # filter low confidence or empty
-            (x, y, w, h) = (textData['left'][i], textData['top'][i], textData['width'][i], textData['height'][i])
-            cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    
-    # ✅ Convert pytesseract dict into clean list format
     texts = []
     for i in range(len(textData['text'])):
         text = textData['text'][i].strip()
@@ -1371,13 +1151,12 @@ def main(image_path):
     # Merge nearby words into sentences
     texts_merged = merge_nearby_texts(texts)
     
-    result = restructureData(rectangles, contours, texts_merged)
+    structuredData = restructureData(rectangles, contours, texts_merged)
     
-    # print(result)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    # visualize(thresh, drawContour, image2)
-    visualize(image, drawContour, textImg)
-
-
-# ---------------- Run ----------------
-main("./images/sqD3.png")
+    end_time = time.time()
+    
+    executionTime = end_time - start_time
+    
+    structuredData["executionTime"] = f"{executionTime} second/s"
+    
+    return structuredData

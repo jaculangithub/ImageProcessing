@@ -116,11 +116,7 @@ def draw_rectangles(image, rectangles, line_areas_to_remove, bg_color=(255, 255,
 
 # new code 9/27/2025 12AM
 def classify_relationship(contours, hierarchy, idx):
-    """
-    Classify a contour (line + attached symbol) into UML relationship type.
-    Returns classification and points (start/end for directed, endpoints for plain associations).
-    """
-    
+      
     global epsilon_ratio
     cnt = contours[idx]
     child_idx = hierarchy[0][idx][2]
@@ -190,6 +186,7 @@ def classify_relationship(contours, hierarchy, idx):
         relationship_type = "association"
         # Return endpoints but no start/end direction
         return relationship_type, None, None, point1, point2, approx
+
 
 def find_farthest_points(approx_points):
     """Find the two points with maximum distance in a set of points."""
@@ -310,9 +307,9 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
     detectedContours = image.copy()
     detectText = image.copy()
     
-    kernel = np.ones((3, 3), np.uint8)
-    detectedContours = cv2.dilate(detectedContours, kernel, iterations=1)  # fills small gaps
-    detectedContours = cv2.erode(detectedContours, kernel, iterations=1)   # shrinks back, keeps merged parts
+    # kernel = np.ones((3, 3), np.uint8)
+    # detectedContours = cv2.dilate(detectedContours, kernel, iterations=1)  # fills small gaps
+    # detectedContours = cv2.erode(detectedContours, kernel, iterations=1)   # shrinks back, keeps merged parts
 
     # Find contours
     contours, hierarchy = cv2.findContours(
@@ -384,9 +381,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
  
 def connectContours(contours_info, max_distance=30):
-    """
-    SIMPLE AND STRAIGHTFORWARD: Merge contours and use opposite endpoints
-    """
     # Build adjacency graph
     graph = {i: [] for i in range(len(contours_info))}
     connection_info = {}  # Store which points connected between contours
@@ -1121,6 +1115,7 @@ def main(image_path):
     # --- 3. OCR + bounding box info ---
     data = pytesseract.image_to_data(textImg, output_type=Output.DICT)
     d1 = pytesseract.image_to_string(textImg)
+    
     # --- 4. Convert grayscale to BGR for drawing ---
     textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
 
@@ -1135,13 +1130,15 @@ def main(image_path):
             cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
     
+    print("number of relationship" ,len(contours))
     structuredData = reStructureData(rectangles, contours, data, textImg)
     
     # Print the complete structured data
     print_structured_data(structuredData)
-   
+    
+    print("number of relationship" ,len(contours))
     visualize(textImg, drawContour, image2)
 
 
 # ---------------- Run ----------------
-main("./images/cd_comp.png")
+main("./images/cd7.png")

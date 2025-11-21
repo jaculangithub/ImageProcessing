@@ -1,16 +1,15 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import math 
 import pytesseract
 from pytesseract import Output
 import json
+import time
 
 epsilon_ratio = 0.04
 
 # ---------------- Step 0: Load image ----------------
-def load_image(path):
-    image = cv2.imread(path)
+def load_image_from_file(file):
+    image = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return image, gray
 
@@ -48,7 +47,6 @@ def find_vertical_pairs(segments, y_tol=5, h_tol=5):
    
     return pairs
 
-
 def find_horizontal_pairs(segments, x_tol=5, w_tol=5):
     pairs = []
     
@@ -58,7 +56,6 @@ def find_horizontal_pairs(segments, x_tol=5, w_tol=5):
             x2, y2, w2, h2 = segments[j]
             if abs(x1 - x2) <= x_tol and abs(w1 - w2) <= w_tol:
                 pairs.append((segments[i], segments[j]))
-
     
     return pairs
 
@@ -117,8 +114,6 @@ def draw_rectangles(image, rectangles, line_areas_to_remove, bg_color=(255, 255,
         
     return image_rect
 
-
-# new code 9/27/2025 12AM
 def classify_relationship(contours, hierarchy, idx):
     """
     Classify a contour (line + attached symbol) into UML relationship type.
@@ -150,7 +145,6 @@ def classify_relationship(contours, hierarchy, idx):
             child_epsilon = 0.08 * cv2.arcLength(child_cnt, True)
             child_approx = cv2.approxPolyDP(child_cnt, child_epsilon, True)
             child_vertices = len(child_approx)
-            print("Points: ", child_approx.reshape(-1, 2))
             # Classify symbol type
             if child_vertices == 3:
                 relationship_type = "inheritance"
@@ -168,34 +162,26 @@ def classify_relationship(contours, hierarchy, idx):
         # First, check for 5-point sequence (this takes priority)
         has_five_seq, convexHull = find_five_point_sequence(approx)
         
-        if has_five_seq: #break if have 5-point sequence,
-            print("meron")
+        if has_five_seq:
             break
-        # if the decimal is exceeding to the bsta pag lumagpas
         elif epsilon_ratio <= 0.005:
-            print("greatdr", len(approx))
             break 
         
         epsilon_ratio = epsilon_ratio / 2  # decrease epsilon to get more detailed approx
     
-    print("Classifying, Current Epsilon: ", epsilon_ratio)
-    
     if has_five_seq:
-        print("meron 5p", "convexHull", convexHull)
         if convexHull and convexHull == 3:
             relationship_type = "directed association"
         else:
             relationship_type = "composition"
         # Determine start/end for 5-point sequence relationships
         start_point, end_point = determine_start_end_five_sequence(point1, point2, approx)
-        print("Start", start_point, " End: ", end_point, " Point1: ", point1, " Point2: ", point2)
         return relationship_type, start_point, end_point, point1, point2, approx
     else:
         # If no 5-point sequence and no child symbol, it's a plain association
         relationship_type = "association"
         # Return endpoints but no start/end direction
         return relationship_type, None, None, point1, point2, approx
-
 
 def find_farthest_points(approx_points):
     """Find the two points with maximum distance in a set of points."""
@@ -218,7 +204,6 @@ def find_farthest_points(approx_points):
     
     return point1, point2, max_distance
 
-
 def determine_start_end_with_child(point1, point2, child_approx):
     """Determine start/end for contours with child symbols."""
     child_points = np.squeeze(child_approx)
@@ -236,7 +221,6 @@ def determine_start_end_with_child(point1, point2, child_approx):
     else:
         return point1, point2  # point2 is end (closer to symbol)
 
-
 def determine_start_end_five_sequence(point1, point2, approx):
     """Determine start/end for 5-point sequence (filled diamond)."""
     points = np.squeeze(approx)
@@ -251,9 +235,6 @@ def determine_start_end_five_sequence(point1, point2, approx):
     point1_in_seq = any(np.array_equal(np.array(point1), seq_point) for seq_point in five_seq_points)
     point2_in_seq = any(np.array_equal(np.array(point2), seq_point) for seq_point in five_seq_points)
     
-    if point1_in_seq and point2_in_seq:
-        print("Both meron")
-    
     # The point in the sequence is the end (diamond side)
     if point1_in_seq and not point2_in_seq:
         return point2, point1  # point1 is end
@@ -261,16 +242,14 @@ def determine_start_end_five_sequence(point1, point2, approx):
         return point1, point2  # point2 is end
     else:
         # Both or neither in sequence, return as plain association
-        print("Both wala")
         return None, None
-
 
 def find_five_point_sequence(points, min_tolerance=5, tolerance_percent=0.25):
     """Find and return the 5-point sequence if it exists."""
     n = len(points)
     if n < 5:
         return None, None
-    # print(f"Approx Points: {points.reshape(-1, 2)}")
+    
     for start in range(n+(n-1)):
         distances = []
         seq_points = []
@@ -301,30 +280,17 @@ def find_five_point_sequence(points, min_tolerance=5, tolerance_percent=0.25):
             seq_np = np.array(seq_points, dtype=np.int32)
             hull = cv2.convexHull(seq_np, returnPoints=True)
             hull_count = len(hull)
-            print("Found 5 points - L267")
-            print(f"Points: {seq_points}, Distances: {distances}")
-            print(f"Hull Count: {hull_count}, Max: {max(distances):.2f}, Min: {min(distances):.2f}")
-            # print(f"Dynamic Tolerance: {tolerance:.2f}")
-            print("Tolerance1: ", max(distances)-min(distances))
-            print("Tolerance: ",  dynamic_tolerance)
             if hull_count >= 4:
                 return seq_points, hull_count
             elif hull_count == 3:
                 return seq_points, hull_count
             
-    print("No 5points L275")
     return None, None
 
-
-# # new code 10/1/2024 1AM - improved merging logic to handle chains and prevent arrow head merging
 def detect_contours(image, rectangles, bg_color=0, min_area=100):
     detectedContours = image.copy()
     detectText = image.copy()
     
-    # kernel = np.ones((3, 3), np.uint8)
-    # detectedContours = cv2.dilate(detectedContours, kernel, iterations=1)  # fills small gaps
-    # detectedContours = cv2.erode(detectedContours, kernel, iterations=1)   # shrinks back, keeps merged parts
-
     # Find contours
     contours, hierarchy = cv2.findContours(
         detectedContours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
@@ -360,24 +326,13 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 continue  # skip child contours
                 
             count += 1
-            # if(count != 6): continue
             classification, start_point, end_point, endpoint1, endpoint2, approx = classify_relationship(
                 contours, hierarchy, i
             )
 
-            print(f"Contour {count}: {classification}")
-            print()
-            # Draw bounding box
-            cv2.rectangle(contour_img, (x - 1, y - 1), (x + w, y + h), (0, 255, 0), 1)
-            cv2.putText(contour_img, str(count) + str(classification), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, (0, 0, 255), 1, cv2.LINE_AA)
-
             # Draw approx points
             epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
-
-            for pt in approx:
-                cv2.circle(contour_img, tuple(pt[0]), 1, (255, 0, 0), -1)
 
             # Save info for merging - ONLY CHANGE: added has_arrow_head flag
          
@@ -390,38 +345,8 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 "approx": approx,
                 "has_arrow_head": classification in ["aggregation", "composition", "inheritance", "dependency", "directed association"]  # ONLY ADDITION
             })
-            
-            print("=========================================================")
     
     return [contours_info, classHorizontalLineSeparators], hierarchy, detectedContours, contour_img, detectText
-
-
-# ---------------- Step 7: Visualization ----------------
-def visualize(vertical_lines, horizontal_lines, image_rect):
-    plt.figure(figsize=(12,6))
-    
-    plt.subplot(1,3,1)
-    plt.title("Image 3")
-    plt.imshow(vertical_lines, cmap="gray")
-    plt.axis("off")
-    
-    plt.subplot(1,3,2)
-    plt.title("Image 2")
-    plt.imshow(horizontal_lines, cmap="gray")
-    plt.axis("off")
-    
-    plt.subplot(1,3,3)
-    plt.title("Image 3")
-    plt.imshow(cv2.cvtColor(image_rect, cv2.COLOR_BGR2RGB))
-    plt.axis("off")
-    
-    plt.tight_layout()
-    plt.show()
-
-
-def downloadImage(image):
-    # cv2.imwrite("./images/atm.png", image)
-    return None
 
 def getTexts(rect, texts, horizontalLineSeperators):
     
@@ -437,8 +362,6 @@ def getTexts(rect, texts, horizontalLineSeperators):
     upperLineY = horizontalLineSeperators[0]
     lowerLineY = horizontalLineSeperators[1] if len(horizontalLineSeperators) > 1 else None
     
-    print("texts before:", len(texts))
-    
     text_to_remove = []
     for text in texts:
         tx, ty, tw, th, content = text
@@ -448,18 +371,14 @@ def getTexts(rect, texts, horizontalLineSeperators):
             # check if the text is above the first horizontal line separator
             if ty < upperLineY[1]:
                 classNameTexts.append(text)
-                # print("ClassName:", content)
             # check if the text is between the two horizontal line separators
             elif lowerLineY is not None and ty >= upperLineY[1] and (ty + th) <= lowerLineY[1]:
                 attributeTexts.append(text)
-                # print("Attribute:", content)
             # check if the text is below the second horizontal line separator
             elif lowerLineY is not None and ty >= lowerLineY[1]:
                 methodTexts.append(text)
-                # print("Method:", content)
             elif lowerLineY is None and ty >= upperLineY[1]:
                 methodTexts.append(text)
-                # print("Method:", content)
             
             text_to_remove.append(text)  # mark this text for removal
     
@@ -541,10 +460,7 @@ def getTexts(rect, texts, horizontalLineSeperators):
     attributes = group_texts_by_line("attribute", attributeTexts)
     methods = group_texts_by_line("method", methodTexts)
             
-    print("texts after:", len(texts))
-    
     return attributes, methods, class_name, texts
-
 
 # to merge nearby text and form sentence
 def merge_nearby_texts(texts, x_margin=10, y_margin=10, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
@@ -631,15 +547,9 @@ def merge_nearby_texts(texts, x_margin=10, y_margin=10, dash_width_threshold=5, 
             sentence = " ".join(t[4] for t in current_group)
             merged_horizontal.append((x0, y0, x1 - x0, y1 - y0, sentence))
 
-    # --- STEP 4: Very conservative vertical merging (optional) ---
-    # Only merge if you're sure you want multi-line text combined
-    final_merged = merged_horizontal  # Skip vertical merging if it's causing issues
-    
-    # Or use very strict vertical merging:
-    # final_merged = conservative_vertical_merge(merged_horizontal, y_margin)
+    final_merged = merged_horizontal
     
     return final_merged
-  
 
 def to_uniform_point(point):
     """Convert any point format to (np.int32(x), np.int32(y))"""
@@ -653,8 +563,7 @@ def to_uniform_point(point):
     elif hasattr(point, '__iter__') and len(point) == 2:
         return (np.int32(point[0]), np.int32(point[1]))
     else:
-        return (np.int32(0), np.int32(0))   
-
+        return (np.int32(0), np.int32(0))
 
 def mergeTransition(transitions, texts, margin = 15):
     
@@ -668,7 +577,6 @@ def mergeTransition(transitions, texts, margin = 15):
         ex1, ey1, ex2, ey2 = trans_bbox_expanded
 
         transition["labels"] = []
-        # transition["middleLabel"], transition["startLabel"], transition["endLabel"] = None, None, None
         
         for text in texts:
             bx, by, bw, bh, text_content = text
@@ -678,12 +586,9 @@ def mergeTransition(transitions, texts, margin = 15):
             if (bx1 < ex2 and bx2 > ex1 and by1 < ey2 and by2 > ey1):                
                 transition["labels"].append(text)
     
-    print("ccccc", len(transitions[1]["labels"]))
-    
     # merge and remove taht has same label's property
     removeTransitions = []
     mergeTransitions = []
-    
     
     for i in range(len(transitions)):
         if transitions[i].get("labels") is None or len(transitions[i]["labels"]) == 0:
@@ -695,9 +600,7 @@ def mergeTransition(transitions, texts, margin = 15):
             
             for i_label in transitions[i]["labels"]:
                 for j_label in transitions[j]["labels"]:
-                    if(i_label == j_label):
-                        print(f"Transition {transitions[i]['p1']} {transitions[i]['p2']} and {transitions[j]['p1']} {transitions[j]['p2']} have same label: '{i_label[4]}'")            
-                        
+                    if(i_label == j_label):            
                         # should not merge if both have start and end points
                         if(transitions[i]["has_arrow_head"] and transitions[j]["has_arrow_head"]):
                             continue
@@ -719,8 +622,6 @@ def mergeTransition(transitions, texts, margin = 15):
                         else:
                             jPoint1, jPoint2 = transitions[j].get("start"), transitions[j].get("end")
                             arrowhead, startPoint = jPoint2, jPoint1
-                        print("i:", iPoint1, iPoint2)
-                        print("j:", jPoint1, jPoint2)
                         
                         # Convert all points to uniform format using the helper function
                         iPoint1 = to_uniform_point(iPoint1)
@@ -741,11 +642,9 @@ def mergeTransition(transitions, texts, margin = 15):
                         arrowhead_arr = np.array(arrowhead) if arrowhead is not None else None
                         startPoint_arr = np.array(startPoint) if startPoint is not None else None
                         
-                        print("arrowhead:", arrowhead)
                         p1_arr, p2_arr = None, None
                         
                         if arrowhead_arr is not None:
-                            print("arrowhead:", arrowhead)
                             if(transitions[i].get("has_arrow_head") is not None):
                                 relationshipType = transitions[i].get("type")
                             elif(transitions[j].get("has_arrow_head") is not None):
@@ -754,14 +653,6 @@ def mergeTransition(transitions, texts, margin = 15):
                             if(transitions[i].get("end") is not None):
                                 arrowhead_arr = np.array(transitions[i]["end"])
                                 # For plain line j, find the point farthest from the arrowhead
-                                points = transitions[j].get("approx")
-                                max_distance = 0
-                                # for point in points:
-                                #     point_arr = np.array(point)
-                                #     distance = np.linalg.norm(arrowhead_arr - point_arr)
-                                #     if distance > max_distance:
-                                #         max_distance = distance
-                                #         startPoint_arr = point_arr
                                 arrowhead_to_P1 = np.linalg.norm(arrowhead_arr - jPoint1_arr)
                                 arrowhead_to_P2 = np.linalg.norm(arrowhead_arr - jPoint2_arr)
                                 
@@ -771,35 +662,20 @@ def mergeTransition(transitions, texts, margin = 15):
                                 else:
                                     startPoint_arr = jPoint2_arr  # Use the actual point, not the distance
                                 
-                                print("I has arrowhead")
-                                print("Before", arrowhead_arr, startPoint)
                                 p1_arr = np.array(startPoint_arr)
                                 p2_arr = np.array(arrowhead_arr)
-                                print("After", p1_arr, p2_arr)
                                 
                             else:
                                 # j has arrowhead, i is plain line
                                 arrowhead_arr = np.array(transitions[j]["end"])
                                 # For plain line i, find the point farthest from the arrowhead
-                                points = transitions[i].get("approx")
-                                max_distance = 0
-                                # for point in points:
-                                #     point_arr = np.array(point)
-                                #     distance = np.linalg.norm(arrowhead_arr - point_arr)
-                                #     if distance > max_distance:
-                                #         max_distance = distance
-                                #         startPoint_arr = point_arr
-                                
                                 arrowhead_to_P1 = np.linalg.norm(arrowhead_arr - iPoint1_arr)
                                 arrowhead_to_P2 = np.linalg.norm(arrowhead_arr - iPoint2_arr)
                                 
                                 startPoint = max(arrowhead_to_P1, arrowhead_to_P2)
                                 
-                                print("J has arrowhead")
-                                print("Before", arrowhead_arr, startPoint)
                                 p1_arr = np.array(startPoint)
                                 p2_arr = np.array(arrowhead_arr)
-                                print("After", p1_arr, p2_arr)
                         else:
                             point1, point2, _ = find_farthest_points(np.array([iPoint1_arr, iPoint2_arr, jPoint1_arr, jPoint2_arr]))
                             p1_arr = point1
@@ -813,18 +689,6 @@ def mergeTransition(transitions, texts, margin = 15):
                         arrowhead_final = to_uniform_point(arrowhead_arr) if arrowhead_arr is not None else None
                         p1_final = to_uniform_point(p1_arr) if p1_arr is not None else to_uniform_point(iPoint1_arr)
                         p2_final = to_uniform_point(p2_arr) if p2_arr is not None else to_uniform_point(iPoint2_arr)
-
-                        print()
-                        print("+"*100)
-                        print("Merging new contours/relationship")
-                        print("Type:", relationshipType)
-                        print("Start:", startPoint_final)
-                        print("End:", arrowhead_final)
-                        print("p1", p1_final)
-                        print("P2", p2_final)
-                        print("Labels", transitions[i]["labels"])
-                        print("+"*100)
-                        print()
                         
                         # Create merged transition with uniform np.int32 format
                         mergeTransitions.append({
@@ -847,10 +711,8 @@ def mergeTransition(transitions, texts, margin = 15):
     for transition in mergeTransitions:
         transitions.append(transition)
     
-    print("asdasd", len(transitions[0]["labels"]))
     return transitions
 
-       
 def mergeBrokenLines(contours):
     threshold = 5  # number of pixels to consider as one contour in line
     
@@ -970,10 +832,8 @@ def mergeBrokenLines(contours):
         if not hasMerged:
             break
                         
-    print("After merging, total contours:", len(contours)) 
     return contours
-       
-       
+
 def getNodeID(classNodes, point, relationshipID, pos, margin = 10):
     
     # for all arrow line
@@ -995,7 +855,6 @@ def getNodeID(classNodes, point, relationshipID, pos, margin = 10):
             return node["id"]
         
     return None
-     
 
 def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparators):
     # merge broken lines
@@ -1010,7 +869,6 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
     for i, rect in enumerate(rectangles):
         x1, y1, x2, y2 = rect
         
-        print("=" * 50)
         # finding the line separators that belongs to the current rectangle/class
         lineSeparator = []
         for horizontalLine in horizontalLineSeparators:
@@ -1030,16 +888,8 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
             "from": []
         })
     
-    print("Text remaining:", len(texts))
-
     # merged close text outside from the class, it could be the multiplicity
     text_merged = merge_nearby_texts(texts)
-
-    # print("merge text:", len(text_merged))
-    
-    # for txt in text_merged:
-    #     x, y, w, h, content = txt
-    #     print("x:", x, "y:", y, "w:", w, "h:", h, "word:", content)
 
     # process relationship
     for cnt in contours:
@@ -1047,15 +897,10 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
     
     relationships = mergeTransition(relationships, text_merged)
         
-    print("relationship length:", len(relationships))
-    for relationship in relationships:
-        print(relationship["p1"], relationship["p2"])
-    
     for i, relationship in enumerate(relationships): 
         relationship["id"] = "line" + str(i + 1)
     
     for i, relationship in enumerate(relationships):
-        # if relationship.get("type") is not None and relationship.get("type") != "association":
         relationship["middleLabel"], relationship["startLabel"], relationship["endLabel"] = None, None, None
         start = relationship.get("start") if relationship.get("start") is not None else  relationship.get("p1")
         end = relationship.get("end") if relationship.get("end") is not None else  relationship.get("p2")
@@ -1063,21 +908,10 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
         startingNodeID = getNodeID(classNodes, start, relationship.get("id"), "from")
         destinationNodeID = getNodeID(classNodes, end, relationship.get("id"), "to")
         
-        if(startingNodeID is None or destinationNodeID is None):
-            if startingNodeID is None:
-                print("Could not find starting node for transition ", relationship.get("id"))
-            if destinationNodeID is None:
-                print("Could not find destination node for transition ", relationship.get("id"))
-    
         relationship["startNode"] = startingNodeID
         relationship["endNode"] = destinationNodeID
-        
-        print(
-            "start: ", startingNodeID,
-            "end: ", destinationNodeID
-            )
-    
-        def get_label_position(label, p1, p2, percentage_threshold=0.3):  # 20% threshold by default
+
+        def get_label_position(label, p1, p2, percentage_threshold=0.3):
             x, y, w, h, text = label
             label_center = np.array([x + w/2, y + h/2])
             
@@ -1089,17 +923,11 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
             p2_arr = np.array(p2)
             
             # Calculate the total line length
-            # line_length = np.linalg.norm(p1_arr - p2_arr)
             line_length = dist_to_p1 + dist_to_p2
              
             # Calculate the difference as a percentage of the line length
             min_distance = min(dist_to_p1, dist_to_p2)
             diff_percentage = min_distance / line_length
-            
-            print()
-            print("ID:",relationship["id"], len(relationship["labels"]))
-            print("P1 points:", p1, "P2 points:", p2, "length:", line_length)
-            print("Middle:", label_center, "p1:", dist_to_p1, "P2:", dist_to_p2, "percentage:", diff_percentage)
             
             # Check if the difference is small relative to the line length
             if diff_percentage >= percentage_threshold:
@@ -1115,7 +943,6 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
             if position == "p1":
                 if relationship["p1"] is relationship["start"]:
                     relationship["startLabel"] = label[4]
-                    print("StartLabel:", label[4])
                 else: 
                     relationship["endLabel"] = label[4]
             elif position == "p2":
@@ -1125,28 +952,7 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
                     relationship["endLabel"] = label[4]
             else:
                 relationship["middleLabel"] = label[4]
-                
-            print(f"Label '{label[4]}' is at: {position} (distance: {distance:.2f}px)")
 
-    print()
-    for relationship in relationships:
-        print(
-            relationship["id"],
-            relationship["type"],
-            relationship["startNode"],
-            (relationship["p1"]),
-            (relationship["p2"]),
-            relationship["start"],
-            relationship["end"],
-            relationship["startNode"],
-            relationship["endNode"],
-            "legnth ng labels:", len(relationship["labels"]),
-            relationship["startLabel"],
-            relationship["middleLabel"],
-            relationship["endLabel"],
-            "lasy"
-        )
-    
     structuredData = {
         "nodes": [],
         "relationships": []
@@ -1178,10 +984,13 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
         })
     
     return structuredData
-    
+
 # ---------------- Main workflow ----------------
-def main(image_path):
-    image, gray = load_image(image_path)
+def process_class_diagram(file):
+    
+    start_time = time.time()
+    
+    image, gray = load_image_from_file(file)
     thresh = threshold_image(gray)
     vertical_lines, horizontal_lines = extract_lines(thresh)
     
@@ -1203,33 +1012,13 @@ def main(image_path):
     threshImg = threshold_image(cv2.cvtColor(noRectImg, cv2.COLOR_BGR2GRAY))    #threshold again
     
     extractedContours, hierarchy, detectedContours, drawContour, textImg = detect_contours(threshImg, rectangles)
-    # downloadImage(textImg)
     
     contours, classHorizontalSeparators = extractedContours[0], extractedContours[1]
     
-    print(len(contours))
-    print(len(rectangles))
-    
-    image2 = image.copy()
-    
     # --- 3. OCR + bounding box info ---
     textData = pytesseract.image_to_data(textImg, output_type=Output.DICT)
-    d1 = pytesseract.image_to_string(textImg)
-    # --- 4. Convert grayscale to BGR for drawing ---
-    textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
-
-    # --- 5. Draw bounding boxes ---
-    n_boxes = len(textData['level'])
     
-    for i in range(n_boxes):
-        text = textData['text'][i].strip()
-        conf = int(textData['conf'][i])
-
-        if text != "":  # filter low confidence or empty
-            (x, y, w, h) = (textData['left'][i], textData['top'][i], textData['width'][i], textData['height'][i])
-            cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    
+    # --- 5. Extract text data ---
     texts = []
     
     for i in range (len(textData['text'])):
@@ -1242,28 +1031,12 @@ def main(image_path):
             h = int(textData['height'][i])
             texts.append((x, y, w, h, text))
     
-    
-    for rect in rectangles:
-        x1, y1, x2, y2 = rect
-       
-        cv2.rectangle(image2, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        
-        
-    for cnt in contours:
-        print("endpoints:", cnt['p1'], 
-              cnt['p2'], " Type:", cnt['type'], 
-              cnt['has_arrow_head'], 
-              " Start:", cnt['start'], " End:", cnt['end']) 
-    
-    
     structuredData = restructureData(contours, rectangles, texts, classHorizontalSeparators)
+   
+    end_time = time.time()
     
-    print(json.dumps(structuredData, indent=2))
+    executionTime = end_time - start_time
     
+    structuredData["executionTime"] = f"{executionTime} second/s"
     
-    
-    visualize(drawContour, textImg, image2)
-
-
-# ---------------- Run ----------------
-main("./images/cd7.png")
+    return structuredData
