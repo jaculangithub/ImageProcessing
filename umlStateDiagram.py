@@ -4,6 +4,7 @@ import pytesseract
 from pytesseract import Output
 import json
 import time
+import psutil, os
 
 epsilon_ratio = 0.04
 
@@ -267,7 +268,7 @@ def classify_based_on_child(contours, hierarchy, idx):
     if len(children) == 4:
         return "destruction node", None, None, approx
     elif len(children) == 1 and len(grand_children) > 0:
-        return "end node", None, None, approx
+        return "EndNode", None, None, approx
     
     # Check all child contours for diamond shape (4 points)
     child_idx = hierarchy[0][idx][2]
@@ -318,7 +319,7 @@ def classify_contour(contours, hierarchy, idx):
     if bbox_area > 0 and (area / bbox_area) >= 0.7 and circularity >= 0.7:
         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
         approx = cv2.approxPolyDP(cnt, epsilon, True)
-        return "start node", None, None, approx
+        return "StartNode", None, None, approx
     
     # likey arrow
     while True:
@@ -798,7 +799,7 @@ def mergeTransition(transitions, texts, margin=10):
     
     return transitions
 
-def getNodeID(props, point, pos, transition, texts, margin = 8):
+def getConnectedNode(props, point, pos, transition, texts, margin = 8):
     
     # if all detected as plain line
     if(props[0] == "plainLine"):
@@ -807,17 +808,52 @@ def getNodeID(props, point, pos, transition, texts, margin = 8):
     
     # [action, othernotations, label, text_arr]
     allNodes = [props[0], props[1]]
-    
+    def getSide(point, nodeBbox):
+        pointX, pointY = point[0], point[1]
+        x, y, w, h = nodeBbox
+        
+        left   = abs(pointX - x)
+        right  = abs(pointX - (x + w))
+        top    = abs(pointY - y)
+        bottom = abs(pointY - (y + h))
+
+        distances = {
+            "left": left,
+            "right": right,
+            "top": top,
+            "bottom": bottom
+        }
+        side = min(distances, key=distances.get)
+        return side
+            
     # for all arrow line
     for nodes in allNodes:
         for node in nodes:
             x, y, w, h = node["bbox"]
             px, py = point[0], point[1]
             
+            # def getSide(point, nodeBbox):
+            #     pointX, pointY = point[0], point[1]
+            #     x, y, w, h = nodeBbox
+                
+            #     left   = abs(pointX - x)
+            #     right  = abs(pointX - (x + w))
+            #     top    = abs(pointY - y)
+            #     bottom = abs(pointY - (y + h))
+
+            #     distances = {
+            #         "left": left,
+            #         "right": right,
+            #         "top": top,
+            #         "bottom": bottom
+            #     }
+            #     side = min(distances, key=distances.get)
+            #     return side
+            
             if((x-margin <= px) and (x+w+margin >= px) and (y-margin <= py) and (y+h+margin > py)):
                 # inside thee action
                 
-                if(node.get("type") == "Composite State"):
+                if(node.get("type") == "CompositeStateNode"):
                     startPoint = transition.get("start")
                     endPoint = transition.get("end")
                     
@@ -835,8 +871,11 @@ def getNodeID(props, point, pos, transition, texts, margin = 8):
                 node[pos].append({
                     "transitionID": transition.get("id")
                 })
-                return node["id"]
-            
+                
+                side = getSide(point, node["bbox"])
+                
+                return node["id"], side
+    
     # find nodes with nearby text label taht outside to its area
     for nodes in allNodes:
         for node in nodes:
@@ -868,9 +907,11 @@ def getNodeID(props, point, pos, transition, texts, margin = 8):
                         "transitionID": transition.get("id")
                     })
                     
-                    return node["id"] 
+                    side = getSide(point, node["bbox"])
+                    
+                    return node["id"], side
                 
-    return None
+    return None, None
 
 def restructureData(rectangles, contours, texts):
 
@@ -895,7 +936,7 @@ def restructureData(rectangles, contours, texts):
             if(x1 < ox1 and ox2 < x2 and y1 < oy1 and oy2 < y2):
                 otherNotations.append({
                     "id": "notation" + str(len(otherNotations)+1),
-                    "type": "Composite State",
+                    "type": "CompositeStateNode",
                     "bbox": (x1, y1, x2 - x1, y2 - y1),  # Store as (x, y, w, h)
                     "label": ""
                 })
@@ -927,13 +968,14 @@ def restructureData(rectangles, contours, texts):
     
     # separate other notations to arrow
     for contour in contours:          
-        if(contour["type"] in ["end node", "destruction node", "start node", "diamond node"]):
+        if(contour["type"] in ["EndNode", "destruction node", "StartNode", "diamond node"]):
             classification = contour["type"].split()[0]
             bbox = cv2.boundingRect(contour["approx"])                  
             otherNotations.append({
                 "id": "notation" + str(len(otherNotations)+1),
                 "type": classification,
                 "bbox": bbox,
+                "selected": False,
             })
 
         elif (contour["type"] in ["line", "directed arrow"]):
@@ -947,7 +989,7 @@ def restructureData(rectangles, contours, texts):
     
     # find composite state labels and its substates
     for otherNotation in otherNotations:  
-        if otherNotation.get("type") is not None and otherNotation.get("type") == "Composite State":
+        if otherNotation.get("type") is not None and otherNotation.get("type") == "CompositeStateNode":
             x, y, w, h = otherNotation["bbox"]
             
             # detect teh the text remaining that is inside the composite state, it is the composite state label/name
@@ -967,7 +1009,11 @@ def restructureData(rectangles, contours, texts):
             for stateNode in stateNodes:
                 sx, sy, sw, sh = stateNode["bbox"]
                 if((x < sx) and (sx + sw < x + w) and (y < sy) and (y + h > (sy + sh))):
-                    subStates.append(stateNode["id"])
+                    subStates.append({
+                        "id": stateNode["id"],
+                        "label": stateNode["label"],
+                        "type": stateNode["type"],
+                    })
                     stateNode["parent"] = otherNotation["id"]
             
             for innerNotation in otherNotations:
@@ -977,7 +1023,11 @@ def restructureData(rectangles, contours, texts):
                 ix, iy, iw, ih = innerNotation["bbox"]
                 
                 if((x < ix) and (ix + iw < x + w) and (y < iy) and (y + h > (iy + ih))):
-                    subStates.append(innerNotation["id"])
+                    subStates.append({
+                        "id": innerNotation["id"],
+                        "label": innerNotation.get("label", ""),
+                        "type": innerNotation["type"],
+                    })
                     innerNotation["parent"] = otherNotation["id"]
 
             otherNotation["subStates"] = subStates
@@ -989,58 +1039,137 @@ def restructureData(rectangles, contours, texts):
             
             props = (stateNodes, otherNotations, transition.get("label"), text_merged)
             
-            startingNodeID = getNodeID(props, start, "from", transition, copy_texts)
-            destinationNodeID = getNodeID(props, end, "to", transition, copy_texts)    
+            startingNodeID = getConnectedNode(props, start, "from", transition, copy_texts)
+            destinationNodeID = getConnectedNode(props, end, "to", transition, copy_texts)    
+            
+            if startingNodeID and destinationNodeID:
+                transition["startNodeID"] = startingNodeID[0]
+                transition["endNodeID"] = destinationNodeID[0]
+                transition["sourceHandle"] = startingNodeID[1]
+                transition["targetHandle"] = destinationNodeID[1]
             
             transition["startNode"] = startingNodeID
             transition["endNode"] = destinationNodeID
 
+    # get parent Position for sub-states
+    def getParentPosition(node_id):
+        for notation in otherNotations:
+            if notation["id"] == node_id:
+                x, y, w, h = notation["bbox"]
+                return (x, y)
+        return (0, 0)
+    
     structuredData = {
         "nodes": [],
-        "transitions": []
+        "edges": []
     }
     
     for node in stateNodes:
-        structuredData["nodes"].append({
+        x, y, w, h = node.get("bbox", (0,0,0,0))
+        stateNode = {
             "id": node.get("id"),
-            "type": node.get("type"),
-            "label": node.get("label"),
-            "bbox": [int(x) for x in node["bbox"]],
-            "parent": node.get("parent", None),
-            "from": node.get("from", []),
-            "to": node.get("to", []),
-        })
+            "type": "StateNode",
+            "position": {"x": x, "y": y},
+            "data": {"label": node.get("label", "")},
+            "style": {"width": w, "height": h}, 
+            "measured": {"width": w, "height": h},
+        }
+        
+        if(node.get("parent") is not None):
+            parentX, parentY = getParentPosition(node.get("parent"))
+            stateNode["parentId"] = node.get("parent")
+            stateNode["extent"] = "parent"
+            stateNode["position"] = {"x": x-parentX, "y": y-parentY}
+        
+        # if  it a composite node, add as a 1st element in the array
+        if node.get("type") == "CompositeStateNode":
+            structuredData["nodes"].insert(0, stateNode)
+        else:
+            structuredData["nodes"].append(stateNode)
+    
     
     for notation in otherNotations:
-        structuredData["nodes"].append({
-            "id": notation["id"],
-            "type": notation["type"],
-            "label": notation.get("label", ""),
-            "bbox": [int(x) for x in notation["bbox"]],
-            "parent": notation.get("parent", None),
-            "subStates": notation.get("subStates", []),
-            "from": notation.get("from", []),
-            "to": notation.get("to", []),
-        })
-    
+        # structuredData["nodes"].append({
+        #     "id": notation["id"],
+        #     "type": notation["type"],
+        #     "label": notation.get("label", ""),
+        #     "bbox": [int(x) for x in notation["bbox"]],
+        #     "parent": notation.get("parent", None),
+        #     "subStates": notation.get("subStates", []),
+        #     "from": notation.get("from", []),
+        #     "to": notation.get("to", []),
+        # })
+        x, y, w, h = notation.get("bbox", (0,0,0,0))
+        notationNode = {
+            "id": notation.get("id"),
+            "type": notation.get("type"),
+            "position": { "x": x, "y": y },
+            "data": { "label": notation.get("label", "") },
+            "style": { "width": w, "height": h }, 
+            "measured": { "width": w, "height": h },
+        }
+        
+        if(notation.get("parent") is not None):
+            parentX, parentY = getParentPosition(notation.get("parent"))
+            notationNode["parentId"] = notation.get("parent")
+            notationNode["extent"] = "parent"
+            notationNode["position"] = { "x": x - parentX, "y": y - parentY }
+        
+        if(notation.get("subStates") is not None):
+            notationNode["data"]["subStates"] = notation.get("subStates")
+
+        structuredData["nodes"].append(notationNode)
+
     for transition in transitions:
-        transition_data = {
+        # transition_data = {
+        #     "id": transition["id"],
+        #     "type": transition["type"],
+        #     "start": [int(transition["start"][0]), int(transition["start"][1])] if transition.get("start") is not None else None,
+        #     "end": [int(transition["end"][0]), int(transition["end"][1])] if transition.get("end") is not None else None,
+        #     "label": transition.get("label", ""),
+        #     "startNode": transition.get("startNode"),
+        #     "endNode": transition.get("endNode")
+        # }
+        
+        edge = {
             "id": transition["id"],
-            "type": transition["type"],
-            "start": [int(transition["start"][0]), int(transition["start"][1])] if transition.get("start") is not None else None,
-            "end": [int(transition["end"][0]), int(transition["end"][1])] if transition.get("end") is not None else None,
-            "label": transition.get("label", ""),
-            "startNode": transition.get("startNode"),
-            "endNode": transition.get("endNode")
+            "type": "edge",
+            "zIndex": 1000,
+            "style": {"zIndex": 100},
+            "source": transition.get("startNodeID"),
+            "sourceHandle": transition.get("sourceHandle"),
+            "target": transition.get("endNodeID"),
+            "targetHandle": transition.get("targetHandle"),
+            "data": {
+                "diagramType": "state",
+                "sourceHandle": transition.get("sourceHandle"),
+                "targetHandle": transition.get("targetHandle"),
+                "startLabel": transition.get("label", " "),
+                "startSymbol": "none",
+                "endSymbol": "open arrow",
+                "relationshipType": "directedAssociation",
+                "stepLine": True,
+                "lineStyle": "line",
+                # FIXED
+                # "sourceX": int(transition.get("start")[0]) if transition["start"] is not None else None,
+                # "sourceY": int(transition.get("start")[1]) if transition["start"] is not None else None,
+                # "targetX": int(transition.get("end")[0]) if transition["end"] is not None else None,
+                # "targetY": int(transition.get("end")[1]) if transition["end"] is not None else None,
+            }
         }
       
-        structuredData["transitions"].append(transition_data)
+        structuredData["edges"].append(edge)
+    
+    structuredData["type"] = "state"
     
     return structuredData 
 
 # ---------------- Main workflow ----------------
 def process_state_diagram(file):
     start_time = time.time()
+    
+    process = psutil.Process(os.getpid())
+    before = process.memory_info().rss / 1024 / 1024
     
     image, gray = load_image_from_file(file)
     thresh = threshold_image(gray)
@@ -1078,11 +1207,14 @@ def process_state_diagram(file):
             texts.append((x, y, w, h, text))
     
     structuredData = restructureData(rectangles, contours, texts)
-    
+        
     end_time = time.time()
-    
     executionTime = end_time - start_time
     
+    after = process.memory_info().rss / 1024 / 1024
+    memory_used = abs(after - before)
+    
     structuredData["executionTime"] = f"{executionTime} second/s"
+    structuredData["memory_usage"] = f"{memory_used} MB"
     
     return structuredData

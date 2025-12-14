@@ -482,10 +482,24 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             )
             
             x, y, w, h = cv2.boundingRect(approx)
-          
+
+            # newMessage = {
+            #     "type": classification,
+            #     "start" : start_point, 
+            #     "end": end_point,
+            #     "approx": approx,
+            # }
+            # print("Hello:", classification)
+            # if(classification == "self"):
+            #     print("Last startPoints", start_point)
+            #     print("new startPoints", end_point[0], np.int32(y))
+            #     newMessage["start"] = [end_point[0], np.int32(y)]
+            #     contours_info.append(newMessage)
+            #     continue
             
             # get dashline
-            if (w < 40 or ((classification == "asynchronous" or classification == "synchronous") and w < 100)):
+            print("classification:", classification, " w:", w, " h:", h)
+            if (w < 40 or ((classification == "asynchronous" or classification == "synchronous") and w < 100)) and classification != "self":
                 added = False
                 for group in dashLineArr:
                     gx, gy, gw, gh = cv2.boundingRect(group[0])
@@ -504,7 +518,7 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 continue  # Skip further processing for dash contours
             
             cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
-            
+                
             # Draw bounding box
             cv2.rectangle(contour_img, (x - 1, y - 1), (x + w, y + h), (0, 255, 0), 1)
             cv2.putText(contour_img, str(count) + " " + str(classification), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
@@ -514,12 +528,19 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
 
-            contours_info.append({
+            newMessage = {
                 "type": classification,
                 "start" : start_point, 
                 "end": end_point,
                 "approx": approx,
-            })
+            }
+            # print("Hello:", classification)
+            # if(classification == "self"):
+            #     print("Last startPoints", start_point)
+            #     print("new startPoints", end_point[0], np.int32(y))
+            #     newMessage["start"] = [end_point[0], np.int32(y)]
+            contours_info.append(newMessage)
+            
         
             for pt in approx:
                 cv2.circle(contour_img, tuple(pt[0]), 1, (255, 0, 0), -1)
@@ -630,7 +651,6 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             print(x1, " ", y1, " " , x2, " ", y2)
             loopContour.add(rect)
             
-    
     for rect in altContour:
         x1, y1, x2, y2 = rect
     
@@ -1340,44 +1360,47 @@ def main(image_path):
     # downloadImage(textImg)
     image2 = image.copy()
     
-    # --- 3. OCR + bounding box info ---
-    textData = pytesseract.image_to_data(textImg, output_type=Output.DICT)
-    d1 = pytesseract.image_to_string(textImg)
-    # --- 4. Convert grayscale to BGR for drawing ---
-    textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
-    print("Contour ", len(contours))
-    # --- 5. Draw bounding boxes ---
-    n_boxes = len(textData['level'])
-    for i in range(n_boxes):
-        text = textData['text'][i].strip()
-        conf = int(textData['conf'][i])
+    for cont in contours:
+        print("Type:", cont["type"])
+    
+    # # --- 3. OCR + bounding box info ---
+    # textData = pytesseract.image_to_data(textImg, output_type=Output.DICT)
+    # d1 = pytesseract.image_to_string(textImg)
+    # # --- 4. Convert grayscale to BGR for drawing ---
+    # textImg = cv2.cvtColor(textImg, cv2.COLOR_GRAY2BGR)
+    # print("Contour ", len(contours))
+    # # --- 5. Draw bounding boxes ---
+    # n_boxes = len(textData['level'])
+    # for i in range(n_boxes):
+    #     text = textData['text'][i].strip()
+    #     conf = int(textData['conf'][i])
 
-        if text != "":  # filter low confidence or empty
-            (x, y, w, h) = (textData['left'][i], textData['top'][i], textData['width'][i], textData['height'][i])
-            cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    #     if text != "":  # filter low confidence or empty
+    #         (x, y, w, h) = (textData['left'][i], textData['top'][i], textData['width'][i], textData['height'][i])
+    #         cv2.rectangle(textImg, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    #         cv2.putText(textImg, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
     
-    # ✅ Convert pytesseract dict into clean list format
-    texts = []
-    for i in range(len(textData['text'])):
-        text = textData['text'][i].strip()
-        if text != "":  # ignore empty OCR outputs
-            x = int(textData['left'][i])
-            y = int(textData['top'][i])
-            w = int(textData['width'][i])
-            h = int(textData['height'][i])
-            texts.append((x, y, w, h, text))
+    # # ✅ Convert pytesseract dict into clean list format
+    # texts = []
+    # for i in range(len(textData['text'])):
+    #     text = textData['text'][i].strip()
+    #     if text != "":  # ignore empty OCR outputs
+    #         x = int(textData['left'][i])
+    #         y = int(textData['top'][i])
+    #         w = int(textData['width'][i])
+    #         h = int(textData['height'][i])
+    #         texts.append((x, y, w, h, text))
     
-    # Merge nearby words into sentences
-    texts_merged = merge_nearby_texts(texts)
+    # # Merge nearby words into sentences
+    # texts_merged = merge_nearby_texts(texts)
     
-    result = restructureData(rectangles, contours, texts_merged)
+    # result = restructureData(rectangles, contours, texts_merged)
     
-    # print(result)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    # visualize(thresh, drawContour, image2)
+    # # print(result)
+    # print(json.dumps(result, indent=2, ensure_ascii=False))
+    # # visualize(thresh, drawContour, image2)
     visualize(image, drawContour, textImg)
 
 
 # ---------------- Run ----------------
-main("./images/sqD3.png")
+main("./images/sqWithLoop.png")

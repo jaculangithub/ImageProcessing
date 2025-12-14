@@ -40,8 +40,8 @@ def upload():
                     "processed_data": result,
                     "message": f"Successfully processed {diagram_type} diagram"
                 })
-                
-            elif diagram_type == "state":
+    
+            elif diagram_type == "sequence":
                 result = process_sequence_diagram(file)
                 results.append({
                     "filename": file.filename,
@@ -50,14 +50,6 @@ def upload():
                     "message": f"Successfully processed {diagram_type} diagram"
                 })
             
-            elif diagram_type == "sequence":
-                result = process_state_diagram(file)
-                results.append({
-                    "filename": file.filename,
-                    "diagram_type": diagram_type,
-                    "processed_data": result,
-                    "message": f"Successfully processed {diagram_type} diagram"
-                })
             elif diagram_type == "activity":
                 result = process_activity_diagram(file)
                 results.append({
@@ -66,12 +58,13 @@ def upload():
                     "processed_data": result,
                     "message": f"Successfully processed {diagram_type} diagram"
                 })
+          
             else:
                 # For other diagram types, return basic info
                 img = Image.open(file.stream)
                 width, height = img.size
                 
-                results.append({
+                results.append({    
                     "filename": file.filename,
                     "width": width,
                     "height": height,

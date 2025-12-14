@@ -4,6 +4,8 @@ import pytesseract
 from pytesseract import Output
 import json
 import time
+import matplotlib.pyplot as plt
+import math
 
 epsilon_ratio = 0.04
 image_height = 0
@@ -11,6 +13,11 @@ image_width = 0
 actors = []
 removeVerticalLines = []
 removeHorizontalLines = []
+forkJoinNodes = {
+    "horizontal": [],
+    "vertical": []
+}
+
 
 def load_image(file):
     """Load image from file object"""
@@ -44,14 +51,20 @@ def get_segments(lines):
 def find_vertical_pairs(segments, image, y_tol=5, h_tol=5, bg_color=(255, 255, 255)):
     new_image = image.copy()
     allowableHeights = image_height * 0.75
-    global removeVerticalLines
-    
+    global removeVerticalLines, forkJoinNodes
+   
     for segment in segments:
-        if segment[3] > allowableHeights:
-            x, y, w, h = segment
+        x, y, w, h = segment
+        
+        if w > 10 and h > 150 and w/h < 0.2:
+            forkJoinNodes["vertical"].append(segment)
+            # new_image[y-1:y+h+1, x-1:x+w+1] = bg_color
+            # removeVerticalLines.append(segment)
+            
+        elif h > allowableHeights:
             new_image[y-2:y+h+2, x-2:x+w+2] = bg_color
             removeVerticalLines.append(segment)
-        
+           
     segments = [s for s in segments if s not in removeVerticalLines]
     pairs = []
     
@@ -61,17 +74,24 @@ def find_vertical_pairs(segments, image, y_tol=5, h_tol=5, bg_color=(255, 255, 2
             x2, y2, w2, h2 = segments[j]
             if abs(y1 - y2) <= y_tol and abs(h1 - h2) <= h_tol:
                 pairs.append((segments[i], segments[j]))
-
+    
     return pairs, new_image
 
 def find_horizontal_pairs(segments, image, x_tol=5, w_tol=5, bg_color=(255, 255, 255)):
+    
     new_image = image.copy()
     allowableWidth = image_width * 0.75
-    global removeHorizontalLines
+    global removeHorizontalLines, forkJoinNodes
     
     for segment in segments:
         x, y, w, h = segment
-        if w > allowableWidth:
+        
+        if h > 10 and w > 150 and h/w < 0.2:
+            forkJoinNodes["horizontal"].append(segment)
+            # new_image[y-1:y+h+1, x-1:x+w+1] = bg_color
+            # removeHorizontalLines.append(segment)
+        
+        elif w > allowableWidth:
             removeHorizontalLines.append(segment)
             new_image[y-2:y+h+2, x-2:x+w+2] = bg_color
         else:    
@@ -126,6 +146,18 @@ def detect_rectangles(vertical_pairs, horizontal_pairs, vertical_lines, horizont
 def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255, 255, 255)):
     image_rect = image.copy()
     
+    global forkJoinNodes
+    
+    # removing detected forkjoin nodes from consideration
+    for vNode in forkJoinNodes["vertical"]:
+        x, y, w, h = vNode
+        image_rect[y-1:y+h+1, x-1:x+w+1] = bg_color
+    
+    for hNode in forkJoinNodes["horizontal"]:
+        x, y, w, h = hNode
+        image_rect[y-1:y+h+1, x-1:x+w+1] = bg_color
+    
+    # remove rectangles
     for line_area in line_areas_to_remove:
         x1, y1, x2, y2 = line_area
         image_rect[y1:y2, x1:x2] = bg_color
@@ -133,6 +165,8 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
     for vLine in vLines:
         vx, vy, vw, vh = vLine
         if vw < 10: continue
+        
+        intersect_with_vertical_lines = False
         
         for hLine in hLines:
             hx, hy, hw, hh = hLine
@@ -142,7 +176,7 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
                 vy < hy + hh and vy + vh > hy):
                 diameter = min(vh, hw) 
                 radius = diameter // 2
-                
+                intersect_with_vertical_lines = True
                 if vh < hw:
                     image_rect[vy + (vh // 2) - 5: vy + (vh // 2) + 5, vx + (vw//2) + radius] = bg_color
                     image_rect[vy + (vh // 2) - 5: vy + (vh // 2) + 5, vx + (vw//2) - radius] = bg_color
@@ -150,6 +184,10 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
                     image_rect[hy + (hh // 2) - radius, hx + ( hw//2 ) - 5: hx + (hw//2) + 5] = bg_color
                     image_rect[hy + (hh // 2) + radius, hx + ( hw//2 ) - 5: hx + (hw//2) + 5] = bg_color
 
+        # if not intersect_with_vertical_lines:
+        #     image_rect[vy: vy + vh, vx-1] = bg_color
+        #     image_rect[vy: vy + vh, vx+vw+1] = bg_color
+            
     return image_rect
 
 def find_farthest_points(approx_points):
@@ -258,7 +296,7 @@ def classify_based_on_child(contours, hierarchy, idx):
     if len(children) == 4:
         return "destruction node", None, None, approx
     elif len(children) == 1 and len(grand_children) > 0:
-        return "end node", None, None, approx
+        return "EndNode", None, None, approx
     
     child_idx = hierarchy[0][idx][2]
     while child_idx != -1:
@@ -268,7 +306,7 @@ def classify_based_on_child(contours, hierarchy, idx):
         child_approx = cv2.approxPolyDP(child_cnt, child_epsilon, True)
         
         if len(child_approx) == 4 and w/h > .9:
-            return "diamond node", None, None, approx
+            return "DecisionNode", None, None, approx
         
         child_idx = hierarchy[0][child_idx][0]
     
@@ -302,7 +340,7 @@ def classify_contour(contours, hierarchy, idx):
     if bbox_area > 0 and (area / bbox_area) >= 0.75 and circularity >= 0.7:
         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
         approx = cv2.approxPolyDP(cnt, epsilon, True)
-        return "start node", None, None, approx
+        return "StartNode", None, None, approx
     
     while True:
         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
@@ -386,7 +424,7 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
     threshImg = threshold_image(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
     detectedContours = threshImg.copy()
-    detectText = threshImg.copy()
+    # detectText = threshImg.copy()
     
     contours, hierarchy = cv2.findContours(
         detectedContours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
@@ -687,13 +725,68 @@ def mergeTransition(transitions, texts, margin=5):
     
     return transitions, texts
 
-def getNodeID(props, point, pos, transition, margin=8):
+def getConnectedNode(props, point, pos, transition, margin=8):
     allNodes = [props[0], props[1]]
     
     for nodes in allNodes:
         for node in nodes:
             x, y, w, h = node["bbox"]
             px, py = point[0], point[1]
+            
+            def getSide(point, node):
+                pointX, pointY = point[0], point[1]
+                x, y, w, h = node["bbox"]
+                
+                distances = None 
+                                
+                if node["type"] == "ForkJoinNode":
+                    orientation = node.get("orientation")
+
+                    if orientation == "VerticalLine":
+                        handle_positions = {
+                            f"left-{i}":  (x,       y + h * p)
+                            for i, p in enumerate([0.25, 0.50, 0.75])
+                        } | {
+                            f"right-{i}": (x + w,   y + h * p)
+                            for i, p in enumerate([0.25, 0.50, 0.75])
+                        }
+
+                    elif orientation == "HorizontalLine":
+                        handle_positions = {
+                            f"top-{i}":    (x + w * p, y)
+                            for i, p in enumerate([0.25, 0.50, 0.75])
+                        } | {
+                            f"bottom-{i}": (x + w * p, y + h)
+                            for i, p in enumerate([0.25, 0.50, 0.75])
+                        }
+
+                    else:
+                        return None  # Unknown orientation fallback
+
+                    # Compute distances once
+                    closestSide = min(
+                        handle_positions,
+                        key=lambda key: math.hypot(px - handle_positions[key][0], py - handle_positions[key][1])
+                    )
+
+                    return closestSide
+                
+                else:
+                    left   = abs(pointX - x)
+                    right  = abs(pointX - (x + w))
+                    top    = abs(pointY - y)
+                    bottom = abs(pointY - (y + h))
+                    
+                    distances = {
+                        "left": left,
+                        "right": right,
+                        "top": top,
+                        "bottom": bottom
+                    }
+                    
+                    side = min(distances, key=distances.get)
+                    return side 
+            
             
             if ((x-margin <= px) and (x+w+margin >= px) and (y-margin <= py) and (y+h+margin > py)):
                 node["hasConnection"] = True
@@ -704,7 +797,10 @@ def getNodeID(props, point, pos, transition, margin=8):
                 node[pos].append({
                     "transitionID": transition.get("id")
                 })
-                return node["id"]
+                
+                side = getSide(point, node)
+                
+                return node["id"], side
             
             if node["type"] == "diamond":
                 allTextLabel = props[3]
@@ -724,16 +820,22 @@ def getNodeID(props, point, pos, transition, margin=8):
                         
                         if pos not in node:
                             node[pos] = []
-                    
+
                         node[pos].append({
                             "transitionID": transition.get("id")
                         })
                         
-                        return node["id"]
+                        side = getSide(point, node["bbox"])
+                                                
+                        return node["id"], side
 
     return None
 
+
 def restructureData(rectangles, contours, texts):
+    
+    global actors, removeVerticalLines, removeHorizontalLines, forkJoinNodes
+    
     actionNodes = []
     transitions = []
     otherNotations = []
@@ -757,10 +859,23 @@ def restructureData(rectangles, contours, texts):
         
         texts = [text for text in texts if text not in actionTexts]
     
+    verticalForkJoinNodes = forkJoinNodes["vertical"]
+    horizontalForkJoinNodes = forkJoinNodes["horizontal"]
+    
+    for fjNode in verticalForkJoinNodes + horizontalForkJoinNodes:
+        x, y, w, h = fjNode
+        otherNotations.append({
+            "id": "oTherNotation" + str(len(otherNotations)+1),
+            "type": "ForkJoinNode",
+            "bbox": (x, y, w, h),
+            "label": "Fork/Join", 
+            "orientation": "VerticalLine" if fjNode in verticalForkJoinNodes else "HorizontalLine",
+        })
+    
     text_merged = merge_nearby_texts(texts)
     
     for contour in contours:          
-        if contour["type"] in ["end node", "destruction node", "start node", "diamond node"]:
+        if contour["type"] in ["EndNode", "destruction node", "StartNode", "DecisionNode"]:
             classification = contour["type"].split()[0]
             bbox = cv2.boundingRect(contour["approx"])                 
             otherNotations.append({
@@ -783,20 +898,26 @@ def restructureData(rectangles, contours, texts):
             
             props = (actionNodes, otherNotations, transition.get("label"), text_merged)
             
-            startingNodeID = getNodeID(props, start, "from", transition)
-            destinationNodeID = getNodeID(props, end, "to", transition)
+            startingNodeID = getConnectedNode(props, start, "from", transition)
+            destinationNodeID = getConnectedNode(props, end, "to", transition)
+            
+            if(startingNodeID and destinationNodeID):
+                print(startingNodeID[0],"side:", destinationNodeID[1])
+                transition["startNodeID"] = startingNodeID[0]
+                transition["endNodeID"] = destinationNodeID[0]
+                transition["sourceHandle"] = startingNodeID[1] 
+                transition["targetHandle"] = destinationNodeID[1] 
 
+                
     structuredData = {
         "nodes": [],
-        "transitions": []
+        "edges": []
     }
     
-    global actors, removeVerticalLines, removeHorizontalLines
-      
     if len(removeVerticalLines) > 0:
         removeVerticalLines.sort(key=lambda line: line[0])
         removeHorizontalLines.sort(key=lambda line: line[1]) 
-        
+        print("Vertical Lines:", len(removeVerticalLines))
         for i in range(len(removeVerticalLines) - 1):
             line1 = removeVerticalLines[i]
             line2 = removeVerticalLines[i + 1]
@@ -842,53 +963,209 @@ def restructureData(rectangles, contours, texts):
                 "x_boundaries": [left_boundary, right_boundary]
             })
 
-    def getActor(node):
-        bbox = [int(x) for x in node["bbox"]]
+
+    # # add the Swimlane
+    # if (len(actors)):
+    #     width, height = max(seg[2] for seg in removeHorizontalLines), max(seg[3] for seg in removeVerticalLines) 
         
-        for actor in actors:
-            actorBoundaries = actor["x_boundaries"]
-            if actorBoundaries[0] < bbox[0] and actorBoundaries[1] > bbox[0] + bbox[3]:
-                return actor["label"]
-        return None
+    #     swimLaneNode = {
+    #         "id": "Swimlane1",
+    #         "type": "SwimLane",
+    #         "position": { "x": 0, "y": 0 },
+    #         "style": { "width": width, "height": height },
+    #         "data": { "numberOfActors": len(actors), "actors": [actor["label"] for actor in actors] },
+    #         "measured": {"width": width , "height": height},
+    #         "width": width,
+    #         "height": height,
+    #     }
+    #     print(swimLaneNode["data"]["actors"])
+    #     print("Actors:", len(actors))
+    #     structuredData["nodes"].append(swimLaneNode)
+        
     
+    # for node in actionNodes:
+    #     x, y, w, h = node.get("bbox", (0, 0, 0, 0))
+    #     currentNode = {
+    #         "id": node.get("id"),
+    #         "type": node.get("type"),
+    #         "data": {"label": node.get("label")},
+    #         "position":  { "x": x, "y": y},
+    #         "style": { "width": w, "height": h, "zIndex": "1000" },
+    #         "parentId": "Swimlane1",
+    #         "extent": "parent",
+    #         "measured": { "width": w, "height": h },
+    #         "width": w, "height": h,
+    #     }
+        
+    #     structuredData["nodes"].append(currentNode)
+   
+    
+    # for notation in otherNotations:
+    #     x, y, w, h = notation.get("bbox", (0, 0, 0, 0))
+    #     currentNode = {
+    #         "id": notation.get("id"),
+    #         "type": notation.get("type"),
+    #         "data": {"label": notation.get("label", "notation1")},
+    #         "position":  { "x": x, "y": y},
+    #         "style": { "width": w, "height": h, "zIndex": "1000" },
+    #         "parentId": "Swimlane1",
+    #         "extent": "parent",
+    #         "measured": { "width": w, "height": h },
+    #         "width": w, "height": h,
+    #     }
+    #     if notation.get("type") == "ForkJoinNode":
+    #         currentNode["data"]["orientation"] = notation.get("orientation", "VerticalLine")
+        
+    #     structuredData["nodes"].append(currentNode)
+   
+    hasActors = False
+   
+    if (len(actors) and len(removeVerticalLines) >= 2):
+        width, height = max(seg[2] for seg in removeHorizontalLines), max(seg[3] for seg in removeVerticalLines) 
+        
+        hasActors = False
+        
+        swimLaneNode = {
+            "id": "Swimlane1",  # Capital S to match editor
+            "type": "SwimLane",
+            "position": { "x": 0, "y": 0 },
+            "style": { 
+                "width": width, 
+                "height": height 
+            },
+            "data": { 
+                "numberOfActors": len(actors), 
+                "actors": [actor["label"] for actor in actors] 
+            },
+            # "selected": False,
+            "dragHandle": ".drag-handle__label",  # ADD THIS
+            "measured": {"width": width, "height": height},
+            # REMOVE flat width/height - keep only in style and measured
+        }
+        print(swimLaneNode["data"]["actors"])
+        print("Actors:", len(actors))
+        structuredData["nodes"].append(swimLaneNode)
+
     for node in actionNodes:
-        structuredData["nodes"].append({
+        x, y, w, h = node.get("bbox", (0, 0, 0, 0))
+        currentNode = {
             "id": node.get("id"),
             "type": node.get("type"),
-            "bbox": [int(x) for x in node["bbox"]],
-            "label": node.get("label"),
-            "from": node.get("from", None),
-            "to": node.get("to", None),
-            "actor": getActor(node) if len(actors) > 1 else None
-        })
-    
-    for notation in otherNotations:
-        structuredData["nodes"].append({
-            "id": notation["id"],
-            "type": notation["type"],
-            "bbox": [int(x) for x in notation["bbox"]],
-            "from": notation.get("from", None),
-            "to": notation.get("to", None),
-            "actor": getActor(notation) if len(actors) > 1 else None
-        })
-    
-    for transition in transitions:
-        transition_data = {
-            "id": transition["id"],
-            "type": transition["type"],
-            "start": [int(transition["start"][0]), int(transition["start"][1])] if transition["start"] is not None else None,
-            "end": [int(transition["end"][0]), int(transition["end"][1])] if transition["end"] is not None else None,
+            "data": {
+                "label": node.get("label"),
+                "orientation": "ActionNode",  # ADD THIS
+                "className": "Class"  # ADD THIS
+            },
+            "position": { "x": x, "y": y },
+            "style": { 
+                "width": w, 
+                "height": h, 
+                "zIndex": "1000" 
+            },
+           
+            "dragHandle": ".drag-handle__label",  # ADD THIS
+            # "parentId": "Swimlane1" if hasActors else None,  # Match the SwimLane ID with capital S
+            # "extent": "parent" if hasActors else None,
+            "measured": { "width": w, "height": h },
+            # REMOVE flat width/height
         }
-        if "label" in transition:
-            transition_data["label"] = transition["label"]
-            
-        structuredData["transitions"].append(transition_data)
-    
+        if(hasActors):
+            currentNode["parentId"] = "Swimlane1",  # Match the SwimLane ID with capital S
+            currentNode["extent"] = "parent",
+        
+        
+        structuredData["nodes"].append(currentNode)
+
+    for notation in otherNotations:
+        x, y, w, h = notation.get("bbox", (0, 0, 0, 0))
+        currentNode = {
+            "id": notation.get("id"),
+            "type": notation.get("type"),
+            "data": {"label": notation.get("label", "notation1")},
+            "position": { "x": x, "y": y },
+            # "selected": False,
+            "style": { 
+                "width": w, 
+                "height": h, 
+                "zIndex": "1000" 
+            },
+            "dragHandle": ".drag-handle__label",  # ADD THIS
+            # "parentId": "Swimlane1",  # Match the SwimLane ID with capital S
+            # "extent": "parent",
+            # "parentId": "Swimlane1" if hasActors else None,  # Match the SwimLane ID with capital S
+            # "extent": "parent" if hasActors else None,
+            "measured": { "width": w, "height": h },
+        }
+        if(hasActors):
+            currentNode["parentId"] = "Swimlane1",  # Match the SwimLane ID with capital S
+            currentNode["extent"] = "parent",
+        
+        if notation.get("type") == "ForkJoinNode":
+            currentNode["data"]["orientation"] = notation.get("orientation", "VerticalLine")
+        elif notation.get("type") == "StartNode":
+            currentNode["data"]["label"] = "Start"  # Default for StartNode
+        elif notation.get("type") == "EndNode":
+            currentNode["data"]["label"] = "End"  # Default for EndNode
+        elif notation.get("type") == "DecisionNode":
+            currentNode["data"]["label"] = "Decision"  # Default for DecisionNode
+        
+        structuredData["nodes"].append(currentNode)
+   
+   
+    for transition in transitions:
+        edge = {
+            "id": transition["id"],
+            "type": "edge",
+            "zIndex": 1000,
+            "style": {"zIndex": 100},
+            "source": transition.get("startNodeID"),
+            "sourceHandle": transition.get("sourceHandle"),
+            "target": transition.get("endNodeID"),
+            "targetHandle": transition.get("targetHandle"),
+            "data": {
+                "diagramType": "activity",
+                "sourceHandle": transition.get("sourceHandle"),
+                "targetHandle": transition.get("targetHandle"),
+                "startLabel": transition.get("label", " "),
+                "startSymbol": "none",
+                "endSymbol": "open arrow",
+                "relationshipType": "directedAssociation",
+                "stepLine": True,
+                "lineStyle": "line",
+
+                # FIXED
+                # "sourceX": int(transition.get("start")[0]) if transition["start"] is not None else None,
+                # "sourceY": int(transition.get("start")[1]) if transition["start"] is not None else None,
+                # "targetX": int(transition.get("end")[0]) if transition["end"] is not None else None,
+                # "targetY": int(transition.get("end")[1]) if transition["end"] is not None else None,
+            }
+        
+        }
+
+        structuredData["edges"].append(edge)
+
     return structuredData 
+
+import psutil, os
 
 def process_activity_diagram(file):
     
     start_time = time.time()
+    global actors, removeVerticalLines, removeHorizontalLines, image_height, image_width, forkJoinNodes
+    
+    process = psutil.Process(os.getpid())
+    before = process.memory_info().rss / 1024 / 1024
+    
+    actors = []
+    actors = []
+    removeVerticalLines = []
+    removeHorizontalLines = []
+    image_height = 0
+    image_width = 0
+    forkJoinNodes = {
+        "horizontal": [],
+        "vertical": []
+    }
     
     """Main function to process activity diagram - called from Flask"""
     image, gray = load_image(file)
@@ -919,13 +1196,22 @@ def process_activity_diagram(file):
             w = int(textData['width'][i])
             h = int(textData['height'][i])
             texts.append((x, y, w, h, text))
-    
+            
+    print(len(forkJoinNodes["vertical"]), len(forkJoinNodes["horizontal"]))
+    print("vertical", len(removeVerticalLines), "horizontal", len(removeHorizontalLines)) 
+   
     structuredData = restructureData(rectangles, contours, texts)
     
     end_time = time.time()
     
     executionTime = end_time - start_time
     
+    after = process.memory_info().rss / 1024 / 1024
+    memory_used = abs(after - before)
+    
     structuredData["executionTime"] = f"{executionTime} second/s"
+    # structuredData["ForkJoinNodes"] = forkJoinNodes
+    structuredData["memory_usage"] = f"{memory_used}" 
+    
     
     return structuredData

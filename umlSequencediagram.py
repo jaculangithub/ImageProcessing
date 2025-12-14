@@ -4,8 +4,12 @@ import pytesseract
 from pytesseract import Output
 import json
 import time
+import math
+import os, psutil
+
 
 epsilon_ratio = 0.04
+objectNodes= []
 
 # ---------------- Step 0: Load image ----------------
 def load_image_from_file(file):
@@ -85,6 +89,7 @@ def detect_rectangles(vertical_pairs, horizontal_pairs, vertical_lines, horizont
                 maxHeight = h_bottom_y - h_top_y
                 
                 if((maxWidth - h1Width) < 40 and (maxHeight - v1Height) < 40):
+                    
                     rectangles.append((v_left_x, h_top_y, v_right_x, h_bottom_y))
                     
                     # ADDED: Store the actual line areas that form this rectangle
@@ -257,7 +262,7 @@ def classify_based_on_child(contours, hierarchy, idx):
         
         # Check if child is circular (typical circle has circularity close to 1)
         if circularity > 0.7:  # High circularity indicates circle
-            return "actor", None, None, cnt
+            return "Actor", None, None, cnt
         
         # Move to next sibling child
         child_idx = hierarchy[0][child_idx][0]
@@ -294,7 +299,7 @@ def classify_contour(contours, hierarchy, idx):
     if bbox_area > 0 and (area / bbox_area) >= 0.75 and circularity >= 0.7 and h > 50:
         epsilon = epsilon_ratio * cv2.arcLength(cnt, True)   
         approx = cv2.approxPolyDP(cnt, epsilon, True)
-        return "start node", None, None, approx
+        return "StartNode", None, None, approx
 
     bottom_points = []
     
@@ -306,7 +311,7 @@ def classify_contour(contours, hierarchy, idx):
         
         # delete message, X notation   
         if len(approx) == 8 and h/w > 0.8:
-            return "delete", None, None, approx
+            return "DestroyMessage", None, None, approx
         elif h > 50 and len(approx) > 5:
             # check for 5 point sequence in the left most bottom corner
             points = np.squeeze(approx)    
@@ -365,6 +370,235 @@ def classify_contour(contours, hierarchy, idx):
             classification = "line" 
             return "line", None, None, approx
     return "line", None, None, approx
+
+
+# def detect_contours(image, rectangles, bg_color=0, min_area=100):
+
+#     threshImg = threshold_image(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
+    
+#     detectedContours = threshImg.copy()
+#     detectText = threshImg.copy()
+    
+#     # Find contours
+#     contours, hierarchy = cv2.findContours(
+#         detectedContours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+#     ) 
+
+#     contour_img = cv2.cvtColor(detectedContours, cv2.COLOR_GRAY2BGR)
+#     contours_info = []
+#     count = 0
+    
+#     dashLineArr = []
+    
+#     # find all the contours that are inside the rectangles and remove/skip them
+#     for i, cnt in enumerate(contours):
+#         x, y, w, h = cv2.boundingRect(cnt)
+        
+#         # check if the contour is inside the rect
+#         r = None
+#         loc = None
+#         inTheRect = False
+#         is_in_corner = False
+#         for rect in rectangles:
+#             rx1, ry1, rx2, ry2 = rect
+#             r = rect    
+#             # Check if contour bbox is within rectangle bbox
+#             if x >= rx1 and y >= ry1 and (x + w) <= rx2 and (y + h) <= ry2:
+#                 # Define corner size (adjust based on your needs)
+#                 corner_size = 5  # pixels
+                
+#                 # Check if contour is in any of the four corners
+#                 is_in_corner = False
+                
+#                 # Top-left corner check
+#                 if x <= rx1 + corner_size and y <= ry1 + corner_size:
+#                     is_in_corner = True
+#                     loc = "top-left"
+#                 # Top-right corner check  
+#                 elif x + w >= rx2 - corner_size and y <= ry1 + corner_size:
+#                     is_in_corner = True
+#                     loc = "top-right"
+#                 # Bottom-left corner check
+#                 elif x <= rx1 + corner_size and y + h >= ry2 - corner_size:
+#                     is_in_corner = True
+#                     loc = "bottom left"
+#                 # Bottom-right corner check
+#                 elif x + w >= rx2 - corner_size and y + h >= ry2 - corner_size:
+#                     is_in_corner = True
+#                     loc = "bottom-right"
+                
+#                 if is_in_corner:
+#                     cv2.rectangle(detectText, (x, y), (x + w, y + h), bg_color, -1)  # Fill the whole bounding box
+            
+#                 break  # No need to check other rectangles
+            
+#         if inTheRect and (w < 20 or h < 20): continue  # Skip this contour entirely
+        
+#         if(is_in_corner): continue
+        
+#         if (w > 15 or h > 15) and w+2 >= h or h > 50:  # filter small noise
+            
+#             parent = hierarchy[0][i][3]
+            
+#             if parent != -1:
+#                 continue  # skip child contours
+            
+#             count += 1
+            
+#             classification, start_point, end_point, approx = classify_contour(
+#                 contours, hierarchy, i
+#             )
+            
+#             x, y, w, h = cv2.boundingRect(approx)
+          
+#             print("classification:", classification, " w:", w, " h:", h)
+            
+#             if(classification == "self"):
+#                 print("Last startPoints", start_point)
+#                 print("new startPoints", end_point[0], np.int32(y))
+#                 newMessage = {
+#                     "type": classification,
+#                     "start" : start_point, 
+#                     "end": end_point,
+#                     "approx": approx,
+#                 }
+#                 newMessage["start"] = [end_point[0], np.int32(y)]
+#                 contours_info.append(newMessage)
+#                 continue
+            
+#             # get dashline
+#             if (w < 40 or ((classification == "asynchronous" or classification == "synchronous") and w < 100)):
+#                 added = False
+#                 for group in dashLineArr:
+#                     gx, gy, gw, gh = cv2.boundingRect(group[0])
+                    
+#                     if abs(y - gy) < 20 : # same horizontal level
+#                         group.append(approx)
+#                         added = True
+                    
+#                         break
+                    
+#                   # If not added to any group, create a new one
+#                 if not added:
+#                     dashLineArr.append([cnt])
+
+#                 continue  # Skip further processing for dash contours
+            
+            
+#             cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
+            
+#             contours_info.append({
+#                 "type": classification,
+#                 "start" : start_point, 
+#                 "end": end_point,
+#                 "approx": approx,
+#             })
+
+#     # Process dash line groups to determine start/end for reply messages
+#     for group in dashLineArr:
+#         # Flatten all points from contours in the group
+#         all_points = np.vstack([cnt.reshape(-1, 2) for cnt in group])  # shape: (N, 2)
+        
+#         if(len(group) < 5): 
+#             continue
+        
+#         cv2.drawContours(detectText, [all_points], -1, bg_color, -1)  # Fill contour with background color
+        
+#         # Calculate overall bounding box from all points
+#         x, y, w, h = cv2.boundingRect(all_points)
+#         group_min_x, group_min_y = x, y
+#         group_max_x, group_max_y = x + w, y + h
+        
+#         isDashLineSeparator = False
+        
+#         for rect in rectangles:
+#             x1, y1, x2, y2 = rect
+#             isDashLineSeparator = False
+            
+#             if(abs(x2 - x1) < 50) and (y2-y1) < 200: continue
+#             if(group_min_x <= x1 + 20 and group_max_x >= x2-20):                
+#                 isDashLineSeparator = True
+#                 break
+            
+#         if isDashLineSeparator:
+#             continue
+        
+#         # Sort group by X coordinate to ensure left-to-right order
+#         group_sorted = sorted(group, key=lambda cnt: cv2.boundingRect(cnt)[0])
+
+#         # Check first and last contours for arrowheads (>4 points)
+#         first_contour = group_sorted[0]
+#         last_contour = group_sorted[-1]
+
+#         first_approx_points = len(first_contour)
+#         last_approx_points = len(last_contour)
+
+#         # Determine start and end based on arrowhead position
+#         if last_approx_points > 4:
+#             start_contour = first_contour
+#             end_contour = last_contour
+#             direction = "left_to_right"
+#         elif first_approx_points > 4:
+#             start_contour = last_contour
+#             end_contour = first_contour
+#             direction = "right_to_left"
+#         else:
+#             start_contour = first_contour
+#             end_contour = last_contour
+#             direction = "unknown"
+
+#         # Get start and end points from the determined contours
+#         start_x, start_y, start_w, start_h = cv2.boundingRect(start_contour)
+#         end_x, end_y, end_w, end_h = cv2.boundingRect(end_contour)
+
+#         # Calculate actual start and end coordinates
+#         if direction == "left_to_right":
+#             start_point = (start_x, start_y + start_h//2)
+#             end_point = (end_x + end_w, end_y + end_h//2)
+#         else:  # right_to_left or unknown
+#             start_point = (start_x + start_w, start_y + start_h//2)
+#             end_point = (end_x, end_y + end_h//2)
+
+#         # Add as reply message with all points stored in "approx"
+#         contours_info.append({
+#             "type": "reply",
+#             "start": start_point,
+#             "end": end_point,
+#             "direction": direction,
+#             "segment_count": len(group),
+#             "approx": all_points  # all dash line points
+#         })
+            
+            
+#     for rect in rectangles:
+#         x1, y1, x2, y2 = rect
+
+#         if x2 - x1 < 10 or y2 - y1 < 10:
+#             continue  # Skip small rectangles
+        
+#         # Create proper contour array from rectangle coordinates
+#         contour_points = np.array([
+#             [[x1, y1]],     # Top-left
+#             [[x2, y1]],     # Top-right  
+#             [[x2, y2]],     # Bottom-right
+#             [[x1, y2]]      # Bottom-left
+#         ], dtype=np.int32)
+        
+#         contType = ""  # Default to loop
+#         if (y2 - y1) / (x2 - x1) > 2.5:
+#             contType = "ActivationBar"
+#         else:
+#             contType = "loop"
+        
+#         contours_info.append({
+#             "type": contType,
+#             "start": None, 
+#             "end": None,
+#             "approx": contour_points,  # Proper contour array
+#         })
+    
+#     return contours_info, hierarchy, detectedContours, contour_img, detectText
+
 
 def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
@@ -445,6 +679,20 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             
             x, y, w, h = cv2.boundingRect(approx)
           
+            print("classification:", classification, " w:", w, " h:", h)
+            
+            if(classification == "self"):
+                print("Last startPoints", start_point)
+                print("new startPoints", end_point[0], np.int32(y))
+                newMessage = {
+                    "type": classification,
+                    "start" : start_point, 
+                    "end": end_point,
+                    "approx": approx,
+                }
+                newMessage["start"] = [end_point[0], np.int32(y)]
+                contours_info.append(newMessage)
+                continue
             
             # get dashline
             if (w < 40 or ((classification == "asynchronous" or classification == "synchronous") and w < 100)):
@@ -464,6 +712,7 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
 
                 continue  # Skip further processing for dash contours
             
+            
             cv2.drawContours(detectText, [cnt], -1, bg_color, -1)  # Fill contour with background color
             
             contours_info.append({
@@ -473,6 +722,11 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
                 "approx": approx,
             })
 
+    # NEW: Track different rectangle types
+    altContour = set()  # For rectangles that span dash lines
+    loopContour = set()  # For regular rectangles
+    activationBarContour = set()  # For tall rectangles (aspect ratio > 2.5)
+    
     # Process dash line groups to determine start/end for reply messages
     for group in dashLineArr:
         # Flatten all points from contours in the group
@@ -494,9 +748,13 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             x1, y1, x2, y2 = rect
             isDashLineSeparator = False
             
+            # Skip narrow rectangles (from seq1)
             if(abs(x2 - x1) < 50) and (y2-y1) < 200: continue
+            
+            # Check if rectangle spans the dash line group (from seq1)
             if(group_min_x <= x1 + 20 and group_max_x >= x2-20):                
                 isDashLineSeparator = True
+                altContour.add(rect)  # Add to altContour set
                 break
             
         if isDashLineSeparator:
@@ -547,12 +805,20 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             "segment_count": len(group),
             "approx": all_points  # all dash line points
         })
-            
+    
+    # Process all rectangles with combined logic from both seq1 and seq2
     for rect in rectangles:
         x1, y1, x2, y2 = rect
-
-        if (x2-x1 < 100): continue
-
+        
+        # Skip small rectangles (from seq2)
+        if x2 - x1 < 10 or y2 - y1 < 10:
+            continue
+        
+        # Skip narrow rectangles for loop detection (from seq1)
+        if (x2 - x1 < 100): 
+            # But don't skip for activation bar detection
+            pass  # We'll check aspect ratio below
+        
         # Create proper contour array from rectangle coordinates
         contour_points = np.array([
             [[x1, y1]],     # Top-left
@@ -561,14 +827,46 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
             [[x1, y2]]      # Bottom-left
         ], dtype=np.int32)
         
+        # Determine rectangle type using combined logic
+        contType = "loop"  # Default type
+        
+        # Check 1: Is it an alt? (spanning dash lines - from seq1)
+        if rect in altContour:
+            contType = "alt"
+        else:
+            # Check 2: Is it an activation bar? (tall rectangle - from seq2)
+            aspect_ratio = (y2 - y1) / (x2 - x1) if (x2 - x1) > 0 else 0
+            if aspect_ratio > 2.5:
+                contType = "ActivationBar"
+            # Check 3: Otherwise it's a loop
+            else:
+                contType = "loop"
+        
+        # Add to appropriate tracking set (optional, for debugging)
+        if contType == "alt":
+            altContour.add(rect)
+        elif contType == "ActivationBar":
+            activationBarContour.add(rect)
+        elif contType == "loop":
+            loopContour.add(rect)
+        
         contours_info.append({
-            "type": "loop",
+            "type": contType,
             "start": None, 
             "end": None,
-            "approx": contour_points,  # Proper contour array
+            "approx": contour_points,
         })
+        
+        # Optional: Draw rectangles with different colors for debugging
+        # if contType == "alt":
+        #     cv2.rectangle(contour_img, (x1, y1), (x2, y2), (0, 0, 255), 2)  # Red for alt
+        # elif contType == "ActivationBar":
+        #     cv2.rectangle(contour_img, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green for ActivationBar
+        # elif contType == "loop":
+        #     cv2.rectangle(contour_img, (x1, y1), (x2, y2), (255, 0, 0), 2)  # Blue for loop
     
     return contours_info, hierarchy, detectedContours, contour_img, detectText
+
 
 def is_text_near_rect(tx, ty, tw, th, rect_x, rect_y, rect_w, rect_h, max_dist=10):
     # center of text
@@ -586,11 +884,12 @@ def is_text_near_rect(tx, ty, tw, th, rect_x, rect_y, rect_w, rect_h, max_dist=1
     # if distance is smaller than max_dist in either direction, consider near
     return dist_x <= max_dist and dist_y <= max_dist
 
+
 def extract_text_in_region(rect, texts, contourType):
     matched_text = None
     matched_entry = None
     
-    if contourType == "obj":
+    if contourType == "ObjectNode":
         x, y, w, h = rect
         for entry in texts:
             tx, ty, tw, th, content = entry
@@ -833,15 +1132,65 @@ def extract_text_in_region(rect, texts, contourType):
         
     return matched_text
 
+
+def getConnectedNode(notations, point, margin = 30):
+
+    # for all arrow line
+    for node in notations:
+        x, y, w, h = node["bbox"]
+
+        px, py = int(point[0]), int(point[1])
+
+        def getSide(point, nodeBbox):
+            print(point)
+            pointX, pointY = int(point[0]), int(point[1])
+            x, y, w, h = nodeBbox
+            
+            distances = None
+            
+            if(node["type"] == "ActivationBar"):
+                handle_positions = {
+                    f"left-{i}":  (x,       y + h * p)
+                    for i, p in enumerate([0, 0.25, 0.5, 0.75, 1])
+                } | {
+                    f"right-{i}": (x + w,   y + h * p)
+                    for i, p in enumerate([0, 0.25, 0.5, 0.75, 1])
+                }
+                closestSide = min(
+                    handle_positions,
+                    key=lambda key: math.hypot(pointX - handle_positions[key][0], pointY - handle_positions[key][1])
+                )
+                return closestSide
+            
+            else:
+                left   = abs(pointX - x)
+                right  = abs(pointX - (x + w))
+                
+                distances = {
+                    "left": left,
+                    "right": right
+                }
+                side = min(distances, key=distances.get)
+                return side
+        
+        if((x-margin <= px) and (x+w+margin >= px) and (y-margin <= py) and (y+h+margin > py)):
+            side = getSide([px, py], node["bbox"])
+                
+            return node["id"], side
+           
+    return None
+
+
 def restructureData(rectangles, contours, texts):
+    
     objectNodes = []
     messages = []
     notations = []
     # ids
-    objectID = 0 
+    objectID = 0  
     messageID = 0
     notationID = 0
-    text = ""
+    text = ""    
     
     for cont in contours:   
         classification = cont["type"]
@@ -876,9 +1225,9 @@ def restructureData(rectangles, contours, texts):
                         ifCondition = ""
                         elseCondition = ""
                     notations.append({
-                        "notationID": "notation" + str(notationID),
+                        "id": "notation" + str(notationID),
                         "type": classification,
-                        "bbox": {"x": x, "y": y, "w": w, "h": h},
+                        "bbox": [x, y, w, h],
                         "ifCondition": ifCondition,
                         "elseCondition": elseCondition,
                     })
@@ -888,161 +1237,196 @@ def restructureData(rectangles, contours, texts):
                     
                     for msgContour in contours:
                         if(msgContour is cont): continue
-                        if msgContour["type"] in {"loop", "obj", "alt", "delete", "start node", "actor"} :
+                        if msgContour["type"] in {"loop", "ObjectNode", "alt", "DestroyMessage", "StartNode", "Actor"} :
                             continue
                         mx, my, mw, mh = cv2.boundingRect(msgContour["approx"])
-                        if(mx > x) and (mw+mx < x+w):
+                        if(mx > x) and (mw+mx < x+w) and (my > y) and (mh+my < y+h):
                             isALoop = True                     
                             break
-                
+                            
                     notationType = ""
                     label = ""
                     if isALoop: 
                         notationType = "loop"
                         label = extract_text_in_region(cont, texts, notationType)
                     else: 
-                        notationType = "obj"
+                        notationType = "ObjectNode"
                         label = extract_text_in_region((x,y,w,h), texts, notationType)
-                  
+
+                    if notationType == "ObjectNode" or notationType == "Actor": 
+                        objectNodes.append(cont)
+                        
                     notations.append({
-                        "notationID": "notation" + str(notationID),
+                        "id": "notation" + str(notationID),
                         "type": notationType,
-                        "bbox": {"x": x, "y": y, "w": w, "h": h},
+                        "bbox": [x, y, w, h],
                         "label": label
                     })         
 
             else:
                 text = extract_text_in_region(cont, texts, "notation")             
                 notations.append({
-                    "notationID": "notation" + str(notationID),
+                    "id": "notation" + str(notationID),
                     "type": classification,
-                    "bbox": {"x": x, "y": y, "w": w, "h": h},
+                    "bbox": [x, y, w, h],
                     "label": text,
                 })
             
             notationID += 1
+    
+    print("Total Notations:", len(notations))
+    
+    for i, message in enumerate(messages):
+        message["id"] = "msg" + str(i)
+    
+    for i, message in enumerate(messages):
+        # message["middleLabel"], message["startLabel"], message["endLabel"] = None, None, None
+        start = message.get("start") if message.get("start") is not None else  message.get("p1")
+        end = message.get("end") if message.get("end") is not None else  message.get("p2")
+        print("Type:", message["type"], start, end)        
+        startingNodeID = getConnectedNode(notations, start)
+        destinationNodeID = getConnectedNode(notations, end)  
+    
+        if message.get("type") == "self" and (startingNodeID is not None or destinationNodeID is not None):
+            destinationNodeID = startingNodeID if startingNodeID is not None else destinationNodeID 
+            
+        if startingNodeID is not None and destinationNodeID is not None:
+            message["startNodeID"] = startingNodeID[0]
+            message["endNodeID"] = destinationNodeID[0]
+            message["sourceHandle"] = startingNodeID[1] 
+            message["targetHandle"] = destinationNodeID[1]
 
     for msg in messages:
-        start_point = msg["start"]
-        end_point = msg["end"]
-
-        sender = None
-        receiver = None
-
-        if start_point is not None:
-            sender = find_nearby_notation(start_point, notations)
-        if end_point is not None:
-            receiver = find_nearby_notation(end_point, notations)
-
-        if sender is None and msg["type"] == "self":
-            sender = receiver
-        
-        msg["from"] = sender
-        msg["to"] = receiver
+        print(msg["type"], msg.get("start"), msg.get("sourceHandle"), msg.get("end"),msg.get("targetHandle"))
     
-    # find parent of delete node
+    # find parent of delete node and activation bar
     for notation in notations:
-        if notation["type"] == "delete":
+        if notation["type"] == "DestroyMessage" or notation["type"] == "ActivationBar":
             # Get the delete notation's bounding box
-            nx, ny, nw, nh = notation["bbox"]["x"], notation["bbox"]["y"], notation["bbox"]["w"], notation["bbox"]["h"]
+            nx, ny, nw, nh = notation["bbox"]
             
             # Look for parent object in the same notations array
             parent_object = None
             for obj in notations:
                 # Skip if it's not an object or if it's the same delete notation
-                if obj["type"] == "obj":
-                    ox, oy, ow, oh = obj["bbox"]["x"], obj["bbox"]["y"], obj["bbox"]["w"], obj["bbox"]["h"]
+                if obj["type"] == "ObjectNode" or obj["type"] == "Actor":
+                    ox, oy, ow, oh = obj["bbox"] #["x"], obj["bbox"]["y"], obj["bbox"]["w"], obj["bbox"]["h"]
                     
                     # Check if delete notation is inside this object's bounding box
                     margin = 5
-                    if (ox <= nx and 
-                        nx + nw <= ow+ox):
+                    if (ox <= nx and nx + nw <= ow+ox):
                         parent_object = obj
+                        if oh + oy < ny + nh:
+                            obj["bbox"][3] = (ny + nh) - oy + margin # extend height
+                        
                         break
                     
             # Add parentID to the delete notation
             if parent_object:
-                notation["parentID"] = str(parent_object["notationID"])
+                notation["parentID"] = str(parent_object["id"])
             else:
                 notation["parentID"] = None
     
-    result = {
-        "notations": [],
-        "messages": []
+    def getParentPosition(node_id):
+        for notation in notations:
+            if notation["id"] == node_id:
+                x, y, w, h = notation["bbox"]
+                return (x, y)
+        return (0, 0)
+    
+    structuredData = {
+        "nodes": [],
+        "edges": []
     }
     
     # Add all notations (objects, loops, alt, delete, etc.)
     for notation in notations:
         notation_data = {
-            "id": notation["notationID"],
+            "id": notation["id"],
             "type": notation["type"],
-            "bbox": notation["bbox"],
-            "x": notation["bbox"]["x"],
-            "y": notation["bbox"]["y"],
-            "width": notation["bbox"]["w"],
-            "height": notation["bbox"]["h"]
+            "data": {"label": notation.get("label", ""), },
+            "position": {"x": notation["bbox"][0], "y": notation["bbox"][1]},
+            "style": {"width": notation["bbox"][2], "height": notation["bbox"][3]},
+          
+            # "extent": "parent" if notation.get("parentID") is not None else None,
+            "measured": {"width": notation["bbox"][2], "height": notation["bbox"][3]},
+            "height": notation["bbox"][3],
+            "width": notation["bbox"][2],
         }
+        if notation["type"] == "Actor":
+            notation_data["data"] = {"actorName": notation.get("label", "")}
         
+        if notation.get("parentID") is not None:
+            parent_x, parent_y = getParentPosition(notation["parentID"])
+            notation_data["parentId"] = notation.get("parentID")
+            notation_data["extent"] = "parent"
+            notation_data["position"] = {"x": notation["bbox"][0] - parent_x, "y": notation["bbox"][1] - parent_y}
+            
         # Add type-specific fields
         if notation["type"] == "alt":
-            notation_data["ifCondition"] = notation.get("ifCondition", "")
-            notation_data["elseCondition"] = notation.get("elseCondition", "")
+            notation_data["type"] = "ConditionNode"
+            notation_data["ifCondition"] = notation.get("if_condition", "")
+            notation_data["elseCondition"] = notation.get("else_condition", "")
         elif notation["type"] == "loop":
-            notation_data["label"] = notation.get("label", "")
-        elif notation["type"] == "obj":
-            notation_data["label"] = notation.get("label", "")
-        elif notation["type"] == "delete":
-            notation_data["parentID"] = notation.get("parentID")
+            notation_data["data"] = {"condition": notation.get("label", "")}
+            notation_data["type"] = "LoopNode"
+        elif notation["type"] == "ObjectNode":
+            notation_data["type"] = "ObjectNode"
+            notation_data["data"] = {"objectName": notation.get("label", "OBJECT")}
+        elif notation["type"] == "DestroyMessage":
+            notation_data["parentId"] = notation.get("parentID")
             notation_data["label"] = "X"
-        elif notation["type"] in ["start node", "actor"]:
-            notation_data["label"] = notation.get("label", "")
-        
-        result["notations"].append(notation_data)
+        # elif notation["type"] in ["StartNode", "Actor"]:
+        #     notation_data["label"] = notation.get("label", "")
+        if notation["type"] == "ObjectNode" or notation["type"] == "Actor":
+            notation_data["zIndex"] = 100
+            notation_data["style"]["zIndex"] = 100
+            structuredData["nodes"].insert(0, notation_data)  # Ensure objects/actors are first 
+        else:
+            structuredData["nodes"].append(notation_data)
+    
+    def getSymbols(messageType):
+        if messageType == "asynchronous":
+            return "none", "open arrow", "line"
+        elif messageType == "synchronous":
+            return "none", "closed arrow", "line"
+        elif messageType == "self":
+            return "none", "open arrow", "line"
+        elif messageType == "reply":
+            return "none", "open arrow", "dashLine"
     
     # Add all messages
     for msg in messages:
-        result["messages"].append({
-            "id": msg["messageID"],
-            "type": msg["type"],
-            "from": msg.get("from"),
-            "to": msg.get("to"),
-            "label": msg.get("label", ""),
-            "startPoint": msg.get("start"),
-            "endPoint": msg.get("end")
-        })
+        startSymbol, endSymbol, lineStyle = getSymbols(msg.get("type"))
+        edge = {
+            "zIndex": 1000,
+            "style": {"zIndex": 1000,},
+            "id": msg.get("id"),
+            "type": "edge",
+            "sourceHandle": msg.get("sourceHandle"),
+            "targetHandle": msg.get("targetHandle"),
+            "target": msg.get("endNodeID"),
+            "source": msg.get("startNodeID"),
+            "data": {
+                "diagramType": "sequence",
+                "sourceHandle": msg.get("sourceHandle"),
+                "targetHandle": msg.get("targetHandle"),
+                "middleLabel": msg.get("label", ""),
+                "startSymbol": startSymbol,
+                "endSymbol": endSymbol,
+                "stepLine": True,
+                "lineStyle": lineStyle,
+                # "sourceX": 300.36518306247984,
+                # "sourceY": 207.9684977797755,
+                # "targetX": 33.39106580134796,
+                # "targetY": 207.69488760647522
+            }
+        }
         
-    def convert_numpy_types(obj):
-        """Recursively convert numpy types to Python native types for JSON serialization"""
-        if isinstance(obj, dict):
-            return {key: convert_numpy_types(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_numpy_types(item) for item in obj]
-        elif isinstance(obj, tuple):
-            return [convert_numpy_types(item) for item in obj]
-        elif hasattr(obj, 'tolist'):  # numpy array
-            return obj.tolist()
-        elif hasattr(obj, 'item'):  # numpy scalar
-            return obj.item()
-        elif isinstance(obj, (np.integer, np.int32, np.int64)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float32, np.float64)):
-            return float(obj)
-        else:
-            return obj
-
-    # Apply conversion to the entire result structure
-    result = convert_numpy_types(result)
+        structuredData["edges"].append(edge)
     
-    return result
+    return structuredData
 
-def find_nearby_notation(point, notations, margin=5):
-    px, py = point
-    for note in notations:
-        if(note["type"] == "alt" or note["type"] == "loop"): continue
-        x, y, w, h = note["bbox"]["x"], note["bbox"]["y"], note["bbox"]["w"], note["bbox"]["h"]
-        if (px >= x - margin) and (px <= x + w + margin):
-            return (str(note["notationID"]))
-    return None
 
 def merge_nearby_texts(texts, x_margin=10, y_margin=5, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
     """
@@ -1108,10 +1492,14 @@ def merge_nearby_texts(texts, x_margin=10, y_margin=5, dash_width_threshold=5, a
 
     return merged_texts
 
+
 # ---------------- Main workflow ----------------
 def process_sequence_diagram(file):
     
     start_time = time.time()
+    process = psutil.Process(os.getpid())
+    before = process.memory_info().rss / 1024 / 1024
+    
     
     image, gray = load_image_from_file(file)
     thresh = threshold_image(gray)
@@ -1151,12 +1539,21 @@ def process_sequence_diagram(file):
     # Merge nearby words into sentences
     texts_merged = merge_nearby_texts(texts)
     
+    for cont in contours:
+        print("Contour type:", cont["type"])
+    
     structuredData = restructureData(rectangles, contours, texts_merged)
     
     end_time = time.time()
     
     executionTime = end_time - start_time
     
+    after = process.memory_info().rss / 1024 / 1024
+    memory_used = abs(after - before)
+    
+    
     structuredData["executionTime"] = f"{executionTime} second/s"
+    structuredData["memory_usage"] = f"{memory_used}" 
+    # print(len(rectangles), "rectangles detected.")
     
     return structuredData

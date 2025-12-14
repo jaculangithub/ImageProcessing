@@ -4,6 +4,7 @@ import pytesseract
 from pytesseract import Output
 import json
 import time
+import math
 
 epsilon_ratio = 0.04
 
@@ -834,13 +835,34 @@ def mergeBrokenLines(contours):
                         
     return contours
 
-def getNodeID(classNodes, point, relationshipID, pos, margin = 10):
+
+def getConnectedNode(classNodes, point, relationshipID, pos, margin = 10):
     
     # for all arrow line
     for node in classNodes:
         x, y, w, h = node["bbox"]
         px, py = int(point[0]), int(point[1])
         
+        def getSide(point, nodeBbox):
+            pointX, pointY = point[0], point[1]
+            x, y, w, h = nodeBbox
+
+            positions = [0.20, 0.50, 0.80, 1.00]
+
+            handle_positions = {
+                **{f"top-{i}": (x + w * p, y) for i, p in enumerate(positions)},
+                **{f"bottom-{i}": (x + w * p, y + h) for i, p in enumerate(positions)},
+                **{f"left-{i}": (x, y + h * p) for i, p in enumerate(positions)},
+                **{f"right-{i}": (x + w, y + h * p) for i, p in enumerate(positions)},
+            }
+            closestSide = min(
+                handle_positions,
+                key=lambda key: math.hypot(px - handle_positions[key][0], py - handle_positions[key][1])
+            )
+            
+            # side = min(distances, key=distances.get)
+            return closestSide
+             
         if((x-margin <= px) and (x+w+margin >= px) and (y-margin <= py) and (y+h+margin > py)):
             
             # inside the action
@@ -852,9 +874,12 @@ def getNodeID(classNodes, point, relationshipID, pos, margin = 10):
             node[pos].append({
                 "transitionID": relationshipID
             })
-            return node["id"]
-        
+            side = getSide(point, node["bbox"])
+                
+            return node["id"], side
+
     return None
+
 
 def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparators):
     # merge broken lines
@@ -878,7 +903,7 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
         attributes, methods, class_name, texts = getTexts(rect, texts, lineSeparator)
         
         classNodes.append({
-            "id": len(classNodes) + 1,
+            "id": str(len(classNodes) + 1),
             "type": "class",
             "label": class_name,
             "bbox": (x1, y1, x2, y2),
@@ -905,11 +930,14 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
         start = relationship.get("start") if relationship.get("start") is not None else  relationship.get("p1")
         end = relationship.get("end") if relationship.get("end") is not None else  relationship.get("p2")
         
-        startingNodeID = getNodeID(classNodes, start, relationship.get("id"), "from")
-        destinationNodeID = getNodeID(classNodes, end, relationship.get("id"), "to")
+        startingNodeID = getConnectedNode(classNodes, start, relationship.get("id"), "from")
+        destinationNodeID = getConnectedNode(classNodes, end, relationship.get("id"), "to")
         
-        relationship["startNode"] = startingNodeID
-        relationship["endNode"] = destinationNodeID
+        if startingNodeID and destinationNodeID:
+            relationship["startNodeID"] = startingNodeID[0]
+            relationship["endNodeID"] = destinationNodeID[0]
+            relationship["sourceHandle"] = startingNodeID[1] 
+            relationship["targetHandle"] = destinationNodeID[1] 
 
         def get_label_position(label, p1, p2, percentage_threshold=0.3):
             x, y, w, h, text = label
@@ -953,55 +981,136 @@ def restructureData(contours, rectangles, extractedTexts, horizontalLineSeparato
             else:
                 relationship["middleLabel"] = label[4]
 
+
+    def getAccessibilityModifiers(attributesOrMethods):
+        result = []
+        for item in attributesOrMethods:
+          
+            access_modifier, text = item
+            result.append({
+                "access": access_modifier,
+                "value": text
+            })
+        
+        return result
+    
     structuredData = {
         "nodes": [],
-        "relationships": []
+        "edges": []
     }
     
     for node in classNodes:
-        structuredData["nodes"].append({
+        
+        x, y, w, h = node.get("bbox", (0,0,0,0))
+        w = w - x
+        h = h - y
+        classNode = {
             "id": node.get("id"),
-            "type": node.get("type"),
-            "className": node.get("label"),
-            "bbox": [int(x) for x in node["bbox"]],
-            "attributes": node.get("attributes"),
-            "methods": node.get("methods"),
-            "to": node.get("to"),
-            "from": node.get("from"),
-        })
+            "type": "ClassNode",
+            "position": {"x": x, "y": y},
+            "data": { 
+                "attributes": getAccessibilityModifiers(node.get("attributes", [])),
+                "className": node.get("label", " "),
+                "methods": getAccessibilityModifiers(node.get("methods", [])),
+            },
+            "style": {"width": w, "height": h},
+            "measured": {"width": w, "height": h},
+        }
+        
+        print(classNode["data"]["className"], x, y, w, h)
+        structuredData["nodes"].append(classNode)
+        
+    def getSymbols(relationshipType):
+        startSymbol = "none"
+        endSymbol = "none"
+        lineStyle = "line"
+        
+        if relationshipType == "association":
+            startSymbol = "none"
+            endSymbol = "none"
+            lineStyle = "line"
+        elif relationshipType == "directed association":
+            startSymbol = "none"
+            endSymbol = "open arrow"
+            lineStyle = "line"
+        elif relationshipType == "inheritance":
+            startSymbol = "none"
+            endSymbol = "closed arrow"
+            lineStyle = "line"
+        elif relationshipType == "dependency":
+            startSymbol = "none"
+            endSymbol = "open arrow"
+            lineStyle = "dashLine"
+        elif relationshipType == "aggregation":
+            startSymbol = "none"
+            endSymbol = "open diamond"
+            lineStyle = "line"
+        elif relationshipType == "composition":
+            startSymbol = "none"
+            endSymbol = "filled diamond"
+            lineStyle = "line"
+        
+        return startSymbol, endSymbol, lineStyle
+    
     
     for relationship in relationships:
-        structuredData["relationships"].append({
+        startSymbol, endSymbol, lineStyle = getSymbols(relationship.get("type"))
+        
+        edge = {
             "id": relationship.get("id"),
-            "type": relationship.get("type"),
-            "start": [int(relationship["start"][0]), int(relationship["start"][0])] if relationship.get("start") is not None else None,
-            "end": [int(relationship["end"][0]), int(relationship["end"][0])] if  relationship.get("end") is not None else None,
-            "p1": [int(relationship["p1"][0]), int(relationship["p1"][0])],
-            "p2": [int(relationship["p2"][0]), int(relationship["p2"][0])],
-            "startLabel": relationship.get("startLabel"),
-            "middleLabel": relationship.get("middleLabel"),
-            "endLabel": relationship.get("endLabel")
-        })
+            "type": "edge",
+            "zIndex": 1000,
+            "style": {"zIndex": 100},
+            "source": relationship.get("startNodeID"),
+            "sourceHandle": relationship.get("sourceHandle"),
+            "target": relationship.get("endNodeID"),
+            "targetHandle": relationship.get("targetHandle"),
+            "data": {
+                "diagramType": "class",
+                "sourceHandle": relationship.get("sourceHandle"),
+                "targetHandle": relationship.get("targetHandle"),
+                "startLabel": relationship.get("startLabel") if relationship.get("startLabel") is not None else " ",
+                "middleLabel": relationship.get("middleLabel") if relationship.get("middleLabel") is not None else " ",
+                "endLabel": relationship.get("endLabel") if relationship.get("endLabel") is not None else " ",
+                "startSymbol": startSymbol,
+                "endSymbol": endSymbol,
+                "stepLine": True,
+                "lineStyle": lineStyle,
+                # "sourceX": int(relationship.get("start")[0]) if relationship["start"] is not None else None,
+                # "sourceY": int(relationship.get("start")[1]) if relationship["start"] is not None else None,
+                # "targetX": int(relationship.get("end")[0]) if relationship["end"] is not None else None,
+                # "targetY": int(relationship.get("end")[1]) if relationship["end"] is not None else None,
+            },
+        }
+        
+        structuredData["edges"].append(edge)
     
     return structuredData
+
+
+import psutil, os
 
 # ---------------- Main workflow ----------------
 def process_class_diagram(file):
     
     start_time = time.time()
+    process = psutil.Process(os.getpid())
+    before = process.memory_info().rss / 1024 / 1024
     
+    
+    print("Processing class diagram...")
     image, gray = load_image_from_file(file)
     thresh = threshold_image(gray)
     vertical_lines, horizontal_lines = extract_lines(thresh)
-    
+    print("vertical processing")
     # get contours to all detected vertical and horizontal lines
     vertical_segments = get_segments(vertical_lines)
     horizontal_segments = get_segments(horizontal_lines)
-    
+    print("line pairs")
     # pairs those have almost identical vertical/horizontal lines, and get those lines that has no pairs
     vertical_pairs = find_vertical_pairs(vertical_segments)
     horizontal_pairs = find_horizontal_pairs(horizontal_segments)
-    
+    print(" finding rect")
     # get possible rectangles based on two pairs of vertical and horizontal lines
     rectangles, lines_to_remove = detect_rectangles(vertical_pairs, horizontal_pairs, vertical_segments, horizontal_segments)
     # remove/draw rectangles in the image
@@ -1010,7 +1119,7 @@ def process_class_diagram(file):
     # ==================== Preprocess again the image that after removing teh rect =============================== 
     noRectImg = image_rect.copy()      #copy image after removing rectangles
     threshImg = threshold_image(cv2.cvtColor(noRectImg, cv2.COLOR_BGR2GRAY))    #threshold again
-    
+    print("Rect:", len(rectangles))
     extractedContours, hierarchy, detectedContours, drawContour, textImg = detect_contours(threshImg, rectangles)
     
     contours, classHorizontalSeparators = extractedContours[0], extractedContours[1]
@@ -1036,7 +1145,11 @@ def process_class_diagram(file):
     end_time = time.time()
     
     executionTime = end_time - start_time
+    after = process.memory_info().rss / 1024 / 1024
+    memory_used = abs(after - before)
     
     structuredData["executionTime"] = f"{executionTime} second/s"
+    structuredData["memory_usage"] = f"{memory_used}" 
+    
     
     return structuredData

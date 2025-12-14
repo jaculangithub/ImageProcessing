@@ -149,7 +149,7 @@ def remove_rectangles(image, line_areas_to_remove, vLines, hLines, bg_color=(255
     #         image_rect[middle_y-3:middle_y+3, x-3] = bg_color       #remove left 
     #         image_rect[middle_y-3:middle_y+3,x+w+3] = bg_color      #remove right
         
-    # for hLine in hLines:
+    for hLine in hLines:
         x, y, w, h = hLine
         
         # For horizontal lines: height should be much smaller than width
@@ -471,7 +471,7 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
     threshImg = threshold_image(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
     
     detectedContours = threshImg.copy()
-    detectText = threshImg.copy()
+    # detectText = threshImg.copy()
     
     # Find contours
     contours, hierarchy = cv2.findContours(
@@ -557,6 +557,150 @@ def detect_contours(image, rectangles, bg_color=0, min_area=100):
          
     return contours_info, hierarchy, detectedContours, contour_img, detectText
 
+# def detect_contours(image, rectangles, bg_color=0, min_area=100):
+#     # Create working copies
+#     working_image = image.copy()
+#     gray = cv2.cvtColor(working_image, cv2.COLOR_BGR2GRAY)
+#     threshImg = threshold_image(gray)
+    
+#     detectedContours = threshImg.copy()
+#     detectText = threshImg.copy()  # This will be our final text detection image
+    
+#     # First pass: find and remove diamond contours
+#     contours, hierarchy = cv2.findContours(
+#         detectedContours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+#     ) 
+    
+#     for i, cnt in enumerate(contours):
+#         x, y, w, h = cv2.boundingRect(cnt)
+
+#         # Traverse all children
+#         child_idx = hierarchy[0][i][2]
+#         while child_idx != -1:
+#             child_cnt = contours[child_idx]
+#             cx, cy, cw, ch = cv2.boundingRect(child_cnt)
+
+#             if cw > 25 and ch > 25:
+#                 epsilon = 0.08 * cv2.arcLength(child_cnt, True)
+#                 approx = cv2.approxPolyDP(child_cnt, epsilon, True)
+
+#                 # Check if it's inside any rectangle and in a corner
+#                 inTheRect = False
+#                 is_in_corner = False
+#                 for rect in rectangles:
+#                     rx1, ry1, rx2, ry2 = rect
+#                     if cx >= rx1 and cy >= ry1 and (cx + cw) <= rx2 and (cy + ch) <= ry2:
+#                         inTheRect = True
+#                         corner_size = 10
+#                         if (
+#                             (cx <= rx1 + corner_size and cy <= ry1 + corner_size) or
+#                             (cx + cw >= rx2 - corner_size and cy <= ry1 + corner_size) or
+#                             (cx <= rx1 + corner_size and cy + ch >= ry2 - corner_size) or
+#                             (cx + cw >= rx2 - corner_size and cy + ch >= ry2 - corner_size)
+#                         ):
+#                             is_in_corner = True
+#                         break
+
+#                 if inTheRect and is_in_corner:
+#                     # Remove from ALL image versions consistently
+#                     cv2.drawContours(detectText, [cnt], -1, bg_color, -1)
+#                     cv2.drawContours(working_image, [cnt], -1, (255, 255, 255), -1)  # Also remove from working image
+
+#                 # Diamond shape processing
+#                 if len(approx) == 4:
+#                     middle_y = cy + ch // 2
+#                     middle_x = cx + cw // 2
+
+#                     # Remove from ALL image versions
+#                     for img in [working_image, detectText]:
+#                         img[middle_y-3:middle_y+3, cx-4] = (255, 255, 255) if len(img.shape) == 3 else 255
+#                         img[middle_y-3:middle_y+3, cx+cw+4] = (255, 255, 255) if len(img.shape) == 3 else 255
+#                         img[cy-4, middle_x-3:middle_x+3] = (255, 255, 255) if len(img.shape) == 3 else 255
+#                         img[cy+ch+4, middle_x-3:middle_x+3] = (255, 255, 255) if len(img.shape) == 3 else 255
+
+#             child_idx = hierarchy[0][child_idx][0]
+
+#     # Second pass: regenerate threshold from modified working image
+#     gray_modified = cv2.cvtColor(working_image, cv2.COLOR_BGR2GRAY)
+#     threshImg_modified = threshold_image(gray_modified)
+    
+#     detectedContours_modified = threshImg_modified.copy()
+    
+#     # Find contours on the modified image
+#     contours, hierarchy = cv2.findContours(
+#         detectedContours_modified, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+#     )
+
+#     contour_img = cv2.cvtColor(detectedContours_modified, cv2.COLOR_GRAY2BGR)
+#     contours_info = []
+#     count = 0
+    
+#     for i, cnt in enumerate(contours):
+#         x, y, w, h = cv2.boundingRect(cnt)
+        
+#         # Check if contour is inside any rectangle
+#         inTheRect = False
+#         for rect in rectangles:
+#             rx1, ry1, rx2, ry2 = rect
+#             if x >= rx1 and y >= ry1 and (x + w) <= rx2 and (y + h) <= ry2:
+#                 inTheRect = True
+                
+#                 # Check if in corner
+#                 corner_size = 10
+#                 is_in_corner = (
+#                     (x <= rx1 + corner_size and y <= ry1 + corner_size) or
+#                     (x + w >= rx2 - corner_size and y <= ry1 + corner_size) or
+#                     (x <= rx1 + corner_size and y + h >= ry2 - corner_size) or
+#                     (x + w >= rx2 - corner_size and y + h >= ry2 - corner_size)
+#                 )
+                
+#                 if is_in_corner:
+#                     # Remove from detectText (our final output)
+#                     cv2.drawContours(detectText, [cnt], -1, bg_color, -1)
+#                     # Also remove from working image for consistency
+#                     cv2.drawContours(working_image, [cnt], -1, (255, 255, 255), -1)
+                
+#                 break
+        
+#         if inTheRect: 
+#             continue
+        
+#         if w > 25 or h > 25:
+#             parent = hierarchy[0][i][3]
+            
+#             # Remove ALL internal contours from detectText
+#             cv2.drawContours(detectText, [cnt], -1, bg_color, -1)
+            
+#             if parent != -1:
+#                 continue
+            
+#             count += 1
+            
+#             classification, start_point, end_point, approx = classify_contour(
+#                 contours, hierarchy, i
+#             )
+#             print(f"Contour {count}: {classification}, Start: {start_point}, End: {end_point}")
+#             x, y, w, h = cv2.boundingRect(approx)
+         
+#             # Draw on contour_img for visualization only
+#             cv2.rectangle(contour_img, (x - 1, y - 1), (x + w, y + h), (0, 255, 0), 1)
+#             cv2.putText(contour_img, str(count) + " " + str(classification), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
+#                         0.5, (0, 0, 255), 1, cv2.LINE_AA)
+
+#             epsilon = epsilon_ratio * cv2.arcLength(cnt, True)
+#             approx = cv2.approxPolyDP(cnt, epsilon, True)
+
+#             contours_info.append({
+#                 "type": classification,
+#                 "start": start_point, 
+#                 "end": end_point,
+#                 "approx": approx,
+#             })
+            
+#             for pt in approx:
+#                 cv2.circle(contour_img, tuple(pt[0]), 1, (255, 0, 0), -1)
+                
+#     return contours_info, hierarchy, detectedContours_modified, contour_img, detectText
 
 # ---------------- Step 7: Visualization ----------------
 def visualize(vertical_lines, horizontal_lines, image_rect):
@@ -579,162 +723,6 @@ def visualize(vertical_lines, horizontal_lines, image_rect):
     
     plt.tight_layout()
     plt.show()
-
-
-# def merge_nearby_texts(texts, x_margin=15, y_margin=20, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
-#     """
-#     Merge nearby text boxes into sentences while ignoring vertical dash-like noise.
-#     Uses adaptive vertical grouping for multi-line text.
-    
-#     :param texts: list of tuples (x, y, w, h, text)
-#     :param x_margin: horizontal gap threshold to merge
-#     :param y_margin: vertical gap threshold to consider same paragraph
-#     :param dash_width_threshold: max width to consider as dash noise
-#     :param align_threshold: max allowed difference in X to consider aligned
-#     :param min_vertical_group: number of aligned small-width texts to be considered noise
-#     :return: merged list of tuples (x, y, w, h, sentence)
-#     """
-#     if not texts:
-#         return []
-
-#     # --- STEP 1: Detect and remove vertical dash groups ---
-#     dash_candidates = [t for t in texts if t[2] < dash_width_threshold]
-
-#     remove_set = set()
-#     for i, entry in enumerate(dash_candidates):
-#         x_i = entry[0]
-#         aligned_group = [entry]
-#         for other in dash_candidates:
-#             if other is not entry:
-#                 if abs(other[0] - x_i) <= align_threshold:
-#                     aligned_group.append(other)
-
-#         if len(aligned_group) >= min_vertical_group:
-#             for e in aligned_group:
-#                 remove_set.add(e)
-
-#     texts = [t for t in texts if t not in remove_set]
-
-#     # --- STEP 2: Group by horizontal lines first ---
-#     texts_sorted = sorted(texts, key=lambda t: (t[1], t[0]))
-
-#     # First pass: merge horizontally on same line
-#     horizontal_lines = []
-#     current_line = [texts_sorted[0]]
-
-#     for i in range(1, len(texts_sorted)):
-#         current_text = texts_sorted[i]
-#         last_text = texts_sorted[i-1]
-        
-#         x1, y1, w1, h1, _ = current_text
-#         x2, y2, w2, h2, _ = last_text
-        
-#         # Check if same line (similar Y position)
-#         same_line = abs((y1 + h1/2) - (y2 + h2/2)) <= y_margin / 2
-        
-#         if same_line:
-#             current_line.append(current_text)
-#         else:
-#             horizontal_lines.append(current_line)
-#             current_line = [current_text]
-
-#     if current_line:
-#         horizontal_lines.append(current_line)
-
-#     # Merge each horizontal line
-#     merged_horizontal = []
-#     for line in horizontal_lines:
-#         line_sorted = sorted(line, key=lambda t: t[0])  # Sort by X
-#         current_group = [line_sorted[0]]
-        
-#         for text in line_sorted[1:]:
-#             last_x, last_y, last_w, last_h, last_text = current_group[-1]
-#             x, y, w, h, current_text = text
-            
-#             # Check horizontal proximity
-#             horizontal_gap = x - (last_x + last_w)
-            
-#             if horizontal_gap <= x_margin:
-#                 current_group.append(text)
-#             else:
-#                 # Merge current group
-#                 if current_group:
-#                     x0 = min(t[0] for t in current_group)
-#                     y0 = min(t[1] for t in current_group)
-#                     x1 = max(t[0] + t[2] for t in current_group)
-#                     y1 = max(t[1] + t[3] for t in current_group)
-#                     sentence = " ".join(t[4] for t in current_group)
-#                     merged_horizontal.append((x0, y0, x1 - x0, y1 - y0, sentence))
-                
-#                 current_group = [text]
-        
-#         # Merge remaining group
-#         if current_group:
-#             x0 = min(t[0] for t in current_group)
-#             y0 = min(t[1] for t in current_group)
-#             x1 = max(t[0] + t[2] for t in current_group)
-#             y1 = max(t[1] + t[3] for t in current_group)
-#             sentence = " ".join(t[4] for t in current_group)
-#             merged_horizontal.append((x0, y0, x1 - x0, y1 - y0, sentence))
-
-#     # --- STEP 3: Group vertically for multi-line text ---
-#     merged_horizontal_sorted = sorted(merged_horizontal, key=lambda t: (t[1], t[0]))
-    
-#     vertical_groups = []
-#     used = set()
-    
-#     for i, text1 in enumerate(merged_horizontal_sorted):
-#         if i in used:
-#             continue
-            
-#         vertical_group = [text1]
-#         used.add(i)
-        
-#         x1, y1, w1, h1, t1 = text1
-        
-#         # Find vertically aligned text below
-#         for j, text2 in enumerate(merged_horizontal_sorted):
-#             if j in used:
-#                 continue
-                
-#             x2, y2, w2, h2, t2 = text2
-            
-#             # Check if text2 is below text1 and vertically aligned
-#             is_below = y2 > y1 + h1  # text2 is below text1
-#             vertical_gap = y2 - (y1 + h1)
-#             horizontal_overlap = not (x1 + w1 < x2 or x2 + w2 < x1)
-#             similar_width = abs(w1 - w2) <= max(w1, w2) * 0.5  # Within 50% width difference
-            
-#             # More flexible vertical grouping conditions
-#             if (is_below and vertical_gap <= y_margin * 2 and 
-#                 (horizontal_overlap or similar_width)):
-#                 vertical_group.append(text2)
-#                 used.add(j)
-        
-#         vertical_groups.append(vertical_group)
-
-#     # --- STEP 4: Merge vertical groups ---
-#     final_merged = []
-    
-#     for group in vertical_groups:
-#         if len(group) == 1:
-#             # Single line, just add as is
-#             final_merged.append(group[0])
-#         else:
-#             # Multiple lines, merge with proper formatting
-#             group_sorted = sorted(group, key=lambda t: t[1])  # Sort by Y
-            
-#             x0 = min(t[0] for t in group_sorted)
-#             y0 = min(t[1] for t in group_sorted)
-#             x1 = max(t[0] + t[2] for t in group_sorted)
-#             y1 = max(t[1] + t[3] for t in group_sorted)
-            
-#             # Combine text with space (not newline for now)
-#             sentence = " ".join(t[4] for t in group_sorted)
-#             final_merged.append((x0, y0, x1 - x0, y1 - y0, sentence))
-
-#     return final_merged
-
 
 def merge_nearby_texts(texts, x_margin=10, y_margin=10, dash_width_threshold=5, align_threshold=5, min_vertical_group=5):
     if not texts:
@@ -1303,7 +1291,7 @@ def main(image_path):
     contours, hierarchy, detectedContours, drawContour, textImg = detect_contours(noRectImg, rectangles)
     # downloadImage(textImg)
     image2 = image.copy()
-    
+    txtM = textImg.copy()
     print("Contours: ", len(contours))
     
     # --- 3. OCR + bounding box info ---
@@ -1337,10 +1325,9 @@ def main(image_path):
     
     print(json.dumps(structuredData, indent=2))
     
-    
     # visualize(thresh, drawContour, image2)
-    visualize(image, drawContour, textImg)
+    visualize(vertical_lines, horizontal_lines, textImg)
 
 # ---------------- Run ----------------
-main("./images/atmwithdrawal.png")
+main("./images/actWithMultipleForkJoin.png")
 
